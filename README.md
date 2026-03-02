@@ -1,5 +1,7 @@
 # ib-cl-wrap
 
+English README: [README.en.md](/Users/stephan/Syncthing/dev/clojure/ib-cl-wrap/README.en.md)
+
 Asynchroner Clojure-Wrapper fuer die Interactive Brokers TWS/IB Gateway Java API.
 
 Der Wrapper nutzt `core.async` fuer ein Event-basiertes Modell und vermeidet blockierende Logik in IB-Callback-Threads.
