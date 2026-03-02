@@ -160,8 +160,7 @@
                              :avg-cost avg-cost})))
 
                         "positionEnd"
-                        (publish! {:type :ib/position-end
-                                   :ts (events/now-ms)})
+                        (publish! (events/position-end->event))
 
                         "accountSummary"
                         (let [[req-id account tag value currency] argv]
@@ -174,9 +173,8 @@
                              :currency currency})))
 
                         "accountSummaryEnd"
-                        (publish! {:type :ib/account-summary-end
-                                   :ts (events/now-ms)
-                                   :req-id (first argv)})
+                        (publish! (events/account-summary-end->event
+                                   {:req-id (first argv)}))
 
                         "updateAccountValue"
                         (let [[key value currency account] argv]
@@ -211,13 +209,12 @@
                           {:account (first argv)}))
 
                         "connectionClosed"
-                        (publish! {:type :ib/disconnected
-                                   :ts (events/now-ms)})
+                        (publish! (events/disconnected->event
+                                   {:reason :connection-closed}))
 
                         "nextValidId"
-                        (publish! {:type :ib/next-valid-id
-                                   :ts (events/now-ms)
-                                   :order-id (first argv)})
+                        (publish! (events/next-valid-id->event
+                                   {:order-id (first argv)}))
 
                         nil)
                       (default-for-return-type (.getReturnType method)))))]
@@ -296,20 +293,18 @@
                   :dropped-events dropped-events
                   :request-registry request-registry
                   :overflow-strategy overflow-strategy}]
-        (publish! {:type :ib/connected
-                   :ts (events/now-ms)
-                   :host host
-                   :port port
-                   :client-id client-id})
+        (publish! (events/connected->event
+                   {:host host
+                    :port port
+                    :client-id client-id}))
         conn))))
 
 (defn disconnect!
   "Disconnect from IB and close event resources."
   [{:keys [client reader-thread publish! events] :as conn}]
   (when publish!
-    (publish! {:type :ib/disconnected
-               :ts (events/now-ms)
-               :reason :manual-disconnect}))
+    (publish! (events/disconnected->event
+               {:reason :manual-disconnect})))
   (when client
     (try
       (invoke-method client "eDisconnect")

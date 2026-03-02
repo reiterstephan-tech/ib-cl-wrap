@@ -74,10 +74,20 @@ Minimale Event-Typen:
 - `{:type :ib/update-portfolio :contract {...} :position <double> ... :account <string> :ts <millis>}`
 - `{:type :ib/account-download-end :account <string> :ts <millis>}`
 
+Einheitliche Event-Felder (v1):
+- `:type`
+- `:source`
+- `:status`
+- `:request-id`
+- `:ts`
+- `:schema-version`
+
 IB-Fehler (`:ib/error`) enthalten bei korrelierbaren Requests zusaetzlich:
 - `:request-id`
 - `:request` (z. B. `{:type :account-summary ...}`)
 - `:retryable?` (heuristische Klassifikation fuer transient/retrybar)
+
+Versionierter Event-Contract: [docs/event-schema-v1.md](/Users/stephan/Syncthing/dev/clojure/ib-cl-wrap/docs/event-schema-v1.md)
 
 Contract-Normalisierung (stabil):
 - `:conId`
