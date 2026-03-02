@@ -138,6 +138,13 @@
                       (catch Throwable _ nil))
     :else (some-> value str parse-double-safe)))
 
+(defn- parse-boolean-safe [value]
+  (cond
+    (nil? value) nil
+    (instance? Boolean value) value
+    (string? value) (contains? #{"true" "1" "yes" "y"} (str/lower-case value))
+    :else (boolean value)))
+
 (defn contract->map
   "Normalize IB Contract data into a stable map.
 
@@ -176,6 +183,55 @@
                            (try-zero-arg-method contract "primaryExch")
                            (try-zero-arg-method contract "getExchange"))
                        str)}))
+
+(defn- order-field [order key-candidates method-candidates]
+  (cond
+    (map? order) (pick-value order key-candidates)
+    :else (some #(try-zero-arg-method order %) method-candidates)))
+
+(defn- order->map [order]
+  {:action (some-> (order-field order [:action "action"] ["action"]) str)
+   :orderType (some-> (order-field order [:orderType :order-type "orderType"] ["orderType"]) str)
+   :totalQuantity (parse-double-safe
+                   (order-field order
+                                [:totalQuantity :total-quantity "totalQuantity"]
+                                ["totalQuantity"]))
+   :lmtPrice (parse-double-safe
+              (order-field order
+                           [:lmtPrice :limit-price "lmtPrice"]
+                           ["lmtPrice"]))
+   :auxPrice (parse-double-safe
+              (order-field order
+                           [:auxPrice :aux-price "auxPrice"]
+                           ["auxPrice"]))
+   :tif (some-> (order-field order [:tif "tif"] ["tif"]) str)
+   :transmit (parse-boolean-safe
+              (order-field order [:transmit "transmit"] ["transmit"]))
+   :parentId (parse-long-safe
+              (order-field order [:parentId :parent-id "parentId"] ["parentId"]))})
+
+(defn- order-perm-id [order]
+  (parse-long-safe
+   (order-field order [:permId :perm-id "permId"] ["permId"])))
+
+(defn- order-account [order]
+  (some-> (order-field order [:account "account"] ["account"]) str))
+
+(defn- order-state-field [order-state key-candidates method-candidates]
+  (cond
+    (map? order-state) (pick-value order-state key-candidates)
+    :else (some #(try-zero-arg-method order-state %) method-candidates)))
+
+(defn- order-state->map [order-state]
+  {:status (some-> (order-state-field order-state [:status "status"] ["status"]) str)
+   :commission (parse-double-safe
+                (order-state-field order-state
+                                   [:commission "commission"]
+                                   ["commission"]))
+   :warningText (some-> (order-state-field order-state
+                                           [:warningText :warning-text "warningText"]
+                                           ["warningText"])
+                        str)})
 
 (defn position->event
   "Build normalized `:ib/position` event from IB callback payload."
@@ -274,6 +330,43 @@
   (merge
    (base-event :ib/next-valid-id {:status :ok})
    {:order-id order-id}))
+
+(defn open-order->event
+  "Build normalized `:ib/open-order` event."
+  [{:keys [order-id contract order order-state]}]
+  (let [oid (parse-long-safe order-id)]
+    (merge
+     (base-event :ib/open-order {:status :ok})
+     {:order-id oid
+      :perm-id (order-perm-id order)
+      :account (order-account order)
+      :contract (contract->map contract)
+      :order (order->map order)
+      :order-state (order-state->map order-state)})))
+
+(defn order-status->event
+  "Build normalized `:ib/order-status` event."
+  [{:keys [order-id status filled remaining avg-fill-price perm-id parent-id client-id
+           last-fill-price why-held mkt-cap-price]}]
+  (let [oid (parse-long-safe order-id)]
+    (merge
+     (base-event :ib/order-status {:status :ok})
+     {:order-id oid
+      :status-text (some-> status str)
+      :filled (parse-double-safe filled)
+      :remaining (parse-double-safe remaining)
+      :avgFillPrice (parse-double-safe avg-fill-price)
+      :permId (parse-long-safe perm-id)
+      :parentId (parse-long-safe parent-id)
+      :clientId (parse-long-safe client-id)
+      :lastFillPrice (parse-double-safe last-fill-price)
+      :whyHeld (some-> why-held str)
+      :mktCapPrice (parse-double-safe mkt-cap-price)})))
+
+(defn open-order-end->event
+  "Build normalized `:ib/open-order-end` event."
+  []
+  (base-event :ib/open-order-end {:status :ok}))
 
 (defn error->event
   "Build normalized `:ib/error` event from IB callback payload."

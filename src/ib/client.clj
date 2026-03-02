@@ -176,6 +176,33 @@
                         (publish! (events/account-summary-end->event
                                    {:req-id (first argv)}))
 
+                        "openOrder"
+                        (let [[order-id contract order order-state] argv]
+                          (publish! (events/open-order->event
+                                     {:order-id order-id
+                                      :contract contract
+                                      :order order
+                                      :order-state order-state})))
+
+                        "orderStatus"
+                        (let [[order-id status filled remaining avg-fill-price perm-id parent-id
+                               last-fill-price client-id why-held mkt-cap-price] argv]
+                          (publish! (events/order-status->event
+                                     {:order-id order-id
+                                      :status status
+                                      :filled filled
+                                      :remaining remaining
+                                      :avg-fill-price avg-fill-price
+                                      :perm-id perm-id
+                                      :parent-id parent-id
+                                      :client-id client-id
+                                      :last-fill-price last-fill-price
+                                      :why-held why-held
+                                      :mkt-cap-price mkt-cap-price})))
+
+                        "openOrderEnd"
+                        (publish! (events/open-order-end->event))
+
                         "updateAccountValue"
                         (let [[key value currency account] argv]
                           (publish!
@@ -292,6 +319,7 @@
                   :publish! publish!
                   :dropped-events dropped-events
                   :request-registry request-registry
+                  :open-orders-snapshot-in-flight (atom false)
                   :overflow-strategy overflow-strategy}]
         (publish! (events/connected->event
                    {:host host
@@ -323,6 +351,22 @@
   (when-not client
     (throw (ex-info "Connection map does not contain a client instance" {})))
   (invoke-method client "reqPositions")
+  true)
+
+(defn req-open-orders!
+  "Trigger `reqOpenOrders()` on the IB client."
+  [{:keys [client]}]
+  (when-not client
+    (throw (ex-info "Connection map does not contain a client instance" {})))
+  (invoke-method client "reqOpenOrders")
+  true)
+
+(defn req-all-open-orders!
+  "Trigger `reqAllOpenOrders()` on the IB client."
+  [{:keys [client]}]
+  (when-not client
+    (throw (ex-info "Connection map does not contain a client instance" {})))
+  (invoke-method client "reqAllOpenOrders")
   true)
 
 (defn req-account-summary!

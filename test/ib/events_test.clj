@@ -165,4 +165,44 @@
         (assert-unified-schema-keys evt))
       (is (= 88 (:request-id acct-end)))
       (is (= 88 (:req-id acct-end)))
-      (is (= :ok (:status connected))))))
+      (is (= :ok (:status connected)))))
+
+  (testing "open-order, order-status and open-order-end events normalize payload"
+    (let [open-order (events/open-order->event {:order-id "11"
+                                                :contract {"conid" "123" "symbol" "AAPL" "secType" "STK" "currency" "USD" "exchange" "SMART"}
+                                                :order {"action" "BUY"
+                                                        "orderType" "LMT"
+                                                        "totalQuantity" "10"
+                                                        "lmtPrice" "150.25"
+                                                        "auxPrice" "0"
+                                                        "tif" "DAY"
+                                                        "transmit" true
+                                                        "parentId" "0"
+                                                        "permId" "9991"
+                                                        "account" "DU123"}
+                                                :order-state {"status" "Submitted"
+                                                              "commission" "0.0"
+                                                              "warningText" ""}})
+          status (events/order-status->event {:order-id 11
+                                              :status "Submitted"
+                                              :filled "0"
+                                              :remaining "10"
+                                              :avg-fill-price "0.0"
+                                              :perm-id 9991
+                                              :parent-id 0
+                                              :client-id 42
+                                              :last-fill-price 0.0
+                                              :why-held ""
+                                              :mkt-cap-price 0.0})
+          end (events/open-order-end->event)]
+      (doseq [evt [open-order status end]]
+        (assert-unified-schema-keys evt))
+      (is (= 11 (:order-id open-order)))
+      (is (= 9991 (:perm-id open-order)))
+      (is (= "DU123" (:account open-order)))
+      (is (= "BUY" (get-in open-order [:order :action])))
+      (is (= "Submitted" (get-in open-order [:order-state :status])))
+      (is (= :ib/order-status (:type status)))
+      (is (= "Submitted" (:status-text status)))
+      (is (= 10.0 (:remaining status)))
+      (is (= :ib/open-order-end (:type end))))))

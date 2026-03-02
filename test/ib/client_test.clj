@@ -6,6 +6,8 @@
 
 (definterface IReqPosClient
   (reqPositions [])
+  (reqOpenOrders [])
+  (reqAllOpenOrders [])
   (eDisconnect [])
   (reqAccountSummary [reqId group tags])
   (cancelAccountSummary [reqId])
@@ -91,6 +93,8 @@
     (let [called? (atom false)
           c (reify IReqPosClient
               (reqPositions [_] (reset! called? true))
+              (reqOpenOrders [_] nil)
+              (reqAllOpenOrders [_] nil)
               (eDisconnect [_] nil)
               (reqAccountSummary [_ _ _ _] nil)
               (cancelAccountSummary [_ _] nil)
@@ -123,6 +127,8 @@
     (let [called? (atom false)
           c (reify IReqPosClient
               (reqPositions [_] nil)
+              (reqOpenOrders [_] nil)
+              (reqAllOpenOrders [_] nil)
               (eDisconnect [_] (reset! called? true))
               (reqAccountSummary [_ _ _ _] nil)
               (cancelAccountSummary [_ _] nil)
@@ -142,6 +148,8 @@
           registry (atom {})
           c (reify IReqPosClient
               (reqPositions [_] nil)
+              (reqOpenOrders [_] nil)
+              (reqAllOpenOrders [_] nil)
               (eDisconnect [_] nil)
               (reqAccountSummary [_ req-id group tags]
                 (reset! seen [req-id group tags]))
@@ -158,6 +166,8 @@
           registry (atom {31 {:type :account-summary}})
           c (reify IReqPosClient
               (reqPositions [_] nil)
+              (reqOpenOrders [_] nil)
+              (reqAllOpenOrders [_] nil)
               (eDisconnect [_] nil)
               (reqAccountSummary [_ _ _ _] nil)
               (cancelAccountSummary [_ req-id]
@@ -170,6 +180,8 @@
   (testing "account summary API validates req-id"
     (let [c (reify IReqPosClient
               (reqPositions [_] nil)
+              (reqOpenOrders [_] nil)
+              (reqAllOpenOrders [_] nil)
               (eDisconnect [_] nil)
               (reqAccountSummary [_ _ _ _] nil)
               (cancelAccountSummary [_ _] nil)
@@ -197,6 +209,8 @@
     (let [seen (atom nil)
           c (reify IReqPosClient
               (reqPositions [_] nil)
+              (reqOpenOrders [_] nil)
+              (reqAllOpenOrders [_] nil)
               (eDisconnect [_] nil)
               (reqAccountSummary [_ _ _ _] nil)
               (cancelAccountSummary [_ _] nil)
@@ -209,6 +223,8 @@
     (let [seen (atom nil)
           c (reify IReqPosClient
               (reqPositions [_] nil)
+              (reqOpenOrders [_] nil)
+              (reqAllOpenOrders [_] nil)
               (eDisconnect [_] nil)
               (reqAccountSummary [_ _ _ _] nil)
               (cancelAccountSummary [_ _] nil)
@@ -220,9 +236,32 @@
   (testing "account-updates API validates account"
     (let [c (reify IReqPosClient
               (reqPositions [_] nil)
+              (reqOpenOrders [_] nil)
+              (reqAllOpenOrders [_] nil)
               (eDisconnect [_] nil)
               (reqAccountSummary [_ _ _ _] nil)
               (cancelAccountSummary [_ _] nil)
               (reqAccountUpdates [_ _ _] nil))]
       (is (thrown? clojure.lang.ExceptionInfo
                    (client/req-account-updates! {:client c} {})))))))
+
+(deftest open-orders-request-api-test
+  (testing "req-open-orders! and req-all-open-orders! invoke IB client methods"
+    (let [calls (atom [])
+          c (reify IReqPosClient
+              (reqPositions [_] nil)
+              (reqOpenOrders [_] (swap! calls conj :open))
+              (reqAllOpenOrders [_] (swap! calls conj :all))
+              (eDisconnect [_] nil)
+              (reqAccountSummary [_ _ _ _] nil)
+              (cancelAccountSummary [_ _] nil)
+              (reqAccountUpdates [_ _ _] nil))]
+      (is (true? (client/req-open-orders! {:client c})))
+      (is (true? (client/req-all-open-orders! {:client c})))
+      (is (= [:open :all] @calls))))
+
+  (testing "open orders request API fails with missing client"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (client/req-open-orders! {})))
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (client/req-all-open-orders! {})))))
