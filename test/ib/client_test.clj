@@ -139,6 +139,7 @@
 (deftest account-summary-req-cancel-test
   (testing "req-account-summary! sends expected params and returns req-id"
     (let [seen (atom nil)
+          registry (atom {})
           c (reify IReqPosClient
               (reqPositions [_] nil)
               (eDisconnect [_] nil)
@@ -146,7 +147,7 @@
                 (reset! seen [req-id group tags]))
               (cancelAccountSummary [_ _] nil)
               (reqAccountUpdates [_ _ _] nil))]
-      (is (= 77 (client/req-account-summary! {:client c}
+      (is (= 77 (client/req-account-summary! {:client c :request-registry registry}
                                              {:req-id 77
                                               :group "All"
                                               :tags ["NetLiquidation" "BuyingPower"]})))
@@ -154,6 +155,7 @@
 
   (testing "cancel-account-summary! calls cancel"
     (let [seen (atom nil)
+          registry (atom {31 {:type :account-summary}})
           c (reify IReqPosClient
               (reqPositions [_] nil)
               (eDisconnect [_] nil)
@@ -161,8 +163,9 @@
               (cancelAccountSummary [_ req-id]
                 (reset! seen req-id))
               (reqAccountUpdates [_ _ _] nil))]
-      (is (true? (client/cancel-account-summary! {:client c} 31)))
-      (is (= 31 @seen))))
+      (is (true? (client/cancel-account-summary! {:client c :request-registry registry} 31)))
+      (is (= 31 @seen))
+      (is (nil? (get @registry 31)))))
 
   (testing "account summary API validates req-id"
     (let [c (reify IReqPosClient
@@ -172,9 +175,22 @@
               (cancelAccountSummary [_ _] nil)
               (reqAccountUpdates [_ _ _] nil))]
       (is (thrown? clojure.lang.ExceptionInfo
-                   (client/req-account-summary! {:client c} {:group "All"})))
+                   (client/req-account-summary! {:client c :request-registry (atom {})} {:group "All"})))
       (is (thrown? clojure.lang.ExceptionInfo
-                   (client/cancel-account-summary! {:client c} nil))))))
+                   (client/cancel-account-summary! {:client c :request-registry (atom {})} nil)))))
+
+(deftest request-correlation-helpers-test
+  (let [registry (atom {})
+        conn {:request-registry registry}
+        enrich #'ib.client/enrich-error-event]
+    (client/register-request! conn 99 {:type :account-summary :group "All"})
+    (is (= :account-summary (:type (client/request-context conn 99))))
+    (let [evt (enrich registry {:type :ib/error :id 99 :code 2104 :message "x"})]
+      (is (= 99 (:request-id evt)))
+      (is (= :account-summary (get-in evt [:request :type])))
+      (is (true? (:retryable? evt))))
+    (client/unregister-request! conn 99)
+    (is (nil? (client/request-context conn 99)))))
 
 (deftest account-updates-req-cancel-test
   (testing "req-account-updates! subscribes account stream"
@@ -209,4 +225,4 @@
               (cancelAccountSummary [_ _] nil)
               (reqAccountUpdates [_ _ _] nil))]
       (is (thrown? clojure.lang.ExceptionInfo
-                   (client/req-account-updates! {:client c} {}))))))
+                   (client/req-account-updates! {:client c} {})))))))

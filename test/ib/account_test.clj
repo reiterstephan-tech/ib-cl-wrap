@@ -55,7 +55,25 @@
       (let [result (async/<!! out)]
         (is (false? (:ok result)))
         (is (= :ib-error (:error result)))
-        (is (= 33 (:req-id result)))))))
+        (is (= 33 (:req-id result)))
+        (is (true? (:retryable? result))))))
+
+  (testing "collector matches ib-error via request metadata correlation"
+    (let [events (async/chan 2)
+          out (account/account-summary-snapshot-from-events! events {:req-id 44
+                                                                     :timeout-ms 500})]
+      (async/>!! events {:type :ib/error
+                         :id -1
+                         :code 1101
+                         :message "connectivity restored"
+                         :request-id 44
+                         :request {:type :account-summary
+                                   :req-id 44}})
+      (let [result (async/<!! out)]
+        (is (false? (:ok result)))
+        (is (= :ib-error (:error result)))
+        (is (= 44 (:req-id result)))
+        (is (true? (:retryable? result)))))))
 
 (deftest account-summary-snapshot-timeout-cancels-test
   (testing "snapshot cancels account summary subscription on timeout"

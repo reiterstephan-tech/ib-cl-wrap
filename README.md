@@ -31,6 +31,7 @@ In `deps.edn` ist `lib/ibapi.jar` bereits in `:paths` eingetragen. Wenn die JAR 
 - `cancel-account-summary!` - triggert `cancelAccountSummary(reqId)`.
 - `req-account-updates!` - triggert `reqAccountUpdates(true, account)` fuer Streaming aus dem TWS Account Window.
 - `cancel-account-updates!` - triggert `reqAccountUpdates(false, account)` zum Beenden des Streams.
+- `register-request!` / `unregister-request!` / `request-context` - Request-Korrelation ueber `req-id` fuer request-bezogene Fehler.
 - `dropped-event-count` - Anzahl nicht enqueueter Events.
 - `events-chan` - gibt den geteilten Event-Channel zurueck.
 
@@ -72,6 +73,11 @@ Minimale Event-Typen:
 - `{:type :ib/update-account-time :time <string> :ts <millis>}`
 - `{:type :ib/update-portfolio :contract {...} :position <double> ... :account <string> :ts <millis>}`
 - `{:type :ib/account-download-end :account <string> :ts <millis>}`
+
+IB-Fehler (`:ib/error`) enthalten bei korrelierbaren Requests zusaetzlich:
+- `:request-id`
+- `:request` (z. B. `{:type :account-summary ...}`)
+- `:retryable?` (heuristische Klassifikation fuer transient/retrybar)
 
 Contract-Normalisierung (stabil):
 - `:conId`
