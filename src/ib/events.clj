@@ -169,6 +169,44 @@
    :value (some-> value str)
    :currency (some-> currency str)})
 
+(defn update-account-value->event
+  "Build normalized `:ib/update-account-value` event."
+  [{:keys [key value currency account]}]
+  {:type :ib/update-account-value
+   :ts (now-ms)
+   :key (some-> key str)
+   :value (some-> value str)
+   :currency (some-> currency str)
+   :account (some-> account str)})
+
+(defn update-account-time->event
+  "Build normalized `:ib/update-account-time` event."
+  [{:keys [time]}]
+  {:type :ib/update-account-time
+   :ts (now-ms)
+   :time (some-> time str)})
+
+(defn update-portfolio->event
+  "Build normalized `:ib/update-portfolio` event."
+  [{:keys [contract position market-price market-value average-cost unrealized-pnl realized-pnl account]}]
+  {:type :ib/update-portfolio
+   :ts (now-ms)
+   :contract (contract->map contract)
+   :position (parse-double-safe position)
+   :market-price (parse-double-safe market-price)
+   :market-value (parse-double-safe market-value)
+   :average-cost (parse-double-safe average-cost)
+   :unrealized-pnl (parse-double-safe unrealized-pnl)
+   :realized-pnl (parse-double-safe realized-pnl)
+   :account (some-> account str)})
+
+(defn account-download-end->event
+  "Build normalized `:ib/account-download-end` event."
+  [{:keys [account]}]
+  {:type :ib/account-download-end
+   :ts (now-ms)
+   :account (some-> account str)})
+
 (defn error->event
   "Build normalized `:ib/error` event from IB callback payload."
   [{:keys [id code message raw]}]

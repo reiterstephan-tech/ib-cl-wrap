@@ -143,6 +143,38 @@
                                    :ts (events/now-ms)
                                    :req-id (first argv)})
 
+                        "updateAccountValue"
+                        (let [[key value currency account] argv]
+                          (publish!
+                           (events/update-account-value->event
+                            {:key key
+                             :value value
+                             :currency currency
+                             :account account})))
+
+                        "updateAccountTime"
+                        (publish!
+                         (events/update-account-time->event
+                          {:time (first argv)}))
+
+                        "updatePortfolio"
+                        (let [[contract position market-price market-value average-cost unrealized-pnl realized-pnl account] argv]
+                          (publish!
+                           (events/update-portfolio->event
+                            {:contract contract
+                             :position position
+                             :market-price market-price
+                             :market-value market-value
+                             :average-cost average-cost
+                             :unrealized-pnl unrealized-pnl
+                             :realized-pnl realized-pnl
+                             :account account})))
+
+                        "accountDownloadEnd"
+                        (publish!
+                         (events/account-download-end->event
+                          {:account (first argv)}))
+
                         "connectionClosed"
                         (publish! {:type :ib/disconnected
                                    :ts (events/now-ms)})
@@ -291,6 +323,27 @@
     (throw (ex-info "cancel-account-summary! requires integer req-id" {:req-id req-id})))
   (invoke-method client "cancelAccountSummary" (int req-id))
   true)
+
+(defn req-account-updates!
+  "Start or update IB account updates subscription via `reqAccountUpdates`.
+
+  Options:
+  - `:account` account code (required by IB, usually DU... value)
+  - `:subscribe?` defaults to true"
+  [{:keys [client]} {:keys [account subscribe?]
+                     :or {subscribe? true}}]
+  (when-not client
+    (throw (ex-info "Connection map does not contain a client instance" {})))
+  (when-not (string? account)
+    (throw (ex-info "req-account-updates! requires string :account" {:account account})))
+  (invoke-method client "reqAccountUpdates" (boolean subscribe?) account)
+  true)
+
+(defn cancel-account-updates!
+  "Cancel IB account updates subscription for account."
+  [conn account]
+  (req-account-updates! conn {:account account
+                              :subscribe? false}))
 
 (defn events-chan
   "Return the shared event channel (primarily for diagnostics)."

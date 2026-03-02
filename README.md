@@ -29,6 +29,8 @@ In `deps.edn` ist `lib/ibapi.jar` bereits in `:paths` eingetragen. Wenn die JAR 
 - `req-positions!` - triggert `reqPositions()`.
 - `req-account-summary!` - triggert `reqAccountSummary(reqId, group, tags)`.
 - `cancel-account-summary!` - triggert `cancelAccountSummary(reqId)`.
+- `req-account-updates!` - triggert `reqAccountUpdates(true, account)` fuer Streaming aus dem TWS Account Window.
+- `cancel-account-updates!` - triggert `reqAccountUpdates(false, account)` zum Beenden des Streams.
 - `dropped-event-count` - Anzahl nicht enqueueter Events.
 - `events-chan` - gibt den geteilten Event-Channel zurueck.
 
@@ -66,6 +68,10 @@ Minimale Event-Typen:
 - `{:type :ib/position-end ...}`
 - `{:type :ib/account-summary :req-id <int> :account <string> :tag <string> :value <string> :currency <string> :ts <millis>}`
 - `{:type :ib/account-summary-end :req-id <int> :ts <millis>}`
+- `{:type :ib/update-account-value :key <string> :value <string> :currency <string> :account <string> :ts <millis>}`
+- `{:type :ib/update-account-time :time <string> :ts <millis>}`
+- `{:type :ib/update-portfolio :contract {...} :position <double> ... :account <string> :ts <millis>}`
+- `{:type :ib/account-download-end :account <string> :ts <millis>}`
 
 Contract-Normalisierung (stabil):
 - `:conId`
@@ -75,6 +81,8 @@ Contract-Normalisierung (stabil):
 - `:exchange`
 
 Account Summary ist in IB eine Subscription. Der Snapshot-Helper beendet sie aktiv mit `cancelAccountSummary` bei Erfolg und bei Timeout/Fehler.
+
+Account Updates (`reqAccountUpdates`) ist ebenfalls subscription-basiert und liefert Account-/Portfolio-Daten wie im TWS Account Window.
 
 ## Overflow-Strategie
 
@@ -125,6 +133,18 @@ Das bedeutet: Bei vollem Puffer werden aeltere Events verworfen, neuere behalten
       (println "Balances:" (:values result))
       (println "Account-Summary-Fehler:" result))))
 
+;; Optional: Streaming-Updates fuer ein Konto
+(ib/req-account-updates! conn {:account "DU123456"})
+
+;; laufende Events werden ueber events-ch geliefert:
+;; :ib/update-account-value
+;; :ib/update-account-time
+;; :ib/update-portfolio
+;; :ib/account-download-end
+
+;; spaeter Stream beenden
+(ib/cancel-account-updates! conn "DU123456")
+
 ;; spaeter
 (ib/unsubscribe-events! conn events-ch)
 (ib/disconnect! conn)
@@ -143,6 +163,7 @@ Getestet wird:
 - Snapshot-Collector-Logik
 - Timeout-Verhalten
 - Account-Summary Event-Normalisierung und Snapshot-Timeout inkl. Cancel
+- Account-Updates API (`reqAccountUpdates`) und Event-Normalisierung
 
 ## Hinweise Paper vs Live
 

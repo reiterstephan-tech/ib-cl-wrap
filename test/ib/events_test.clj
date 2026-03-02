@@ -97,4 +97,42 @@
       (is (= "DU123" (:account evt)))
       (is (= "NetLiquidation" (:tag evt)))
       (is (= "12345.67" (:value evt)))
-      (is (= "USD" (:currency evt))))))
+      (is (= "USD" (:currency evt)))))
+
+  (testing "update-account-value/time and account-download-end events normalize payload"
+    (let [value-evt (events/update-account-value->event {:key "BuyingPower"
+                                                         :value "10000"
+                                                         :currency "USD"
+                                                         :account "DU123"})
+          time-evt (events/update-account-time->event {:time "16:04"})
+          end-evt (events/account-download-end->event {:account "DU123"})]
+      (is (= :ib/update-account-value (:type value-evt)))
+      (is (= "BuyingPower" (:key value-evt)))
+      (is (= "10000" (:value value-evt)))
+      (is (= :ib/update-account-time (:type time-evt)))
+      (is (= "16:04" (:time time-evt)))
+      (is (= :ib/account-download-end (:type end-evt)))
+      (is (= "DU123" (:account end-evt)))))
+
+  (testing "update-portfolio->event normalizes numbers and contract"
+    (let [evt (events/update-portfolio->event {:contract {"conid" "7"
+                                                          "symbol" "AAPL"
+                                                          "secType" "STK"
+                                                          "currency" "USD"
+                                                          "exchange" "SMART"}
+                                               :position "2"
+                                               :market-price "150.5"
+                                               :market-value 301.0
+                                               :average-cost "140.0"
+                                               :unrealized-pnl "21.0"
+                                               :realized-pnl "3.0"
+                                               :account "DU123"})]
+      (is (= :ib/update-portfolio (:type evt)))
+      (is (= 7 (get-in evt [:contract :conId])))
+      (is (= 2.0 (:position evt)))
+      (is (= 150.5 (:market-price evt)))
+      (is (= 301.0 (:market-value evt)))
+      (is (= 140.0 (:average-cost evt)))
+      (is (= 21.0 (:unrealized-pnl evt)))
+      (is (= 3.0 (:realized-pnl evt)))
+      (is (= "DU123" (:account evt))))))

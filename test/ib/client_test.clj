@@ -8,7 +8,8 @@
   (reqPositions [])
   (eDisconnect [])
   (reqAccountSummary [reqId group tags])
-  (cancelAccountSummary [reqId]))
+  (cancelAccountSummary [reqId])
+  (reqAccountUpdates [subscribe account]))
 
 (definterface IStartApiClient
   (startAPI []))
@@ -92,7 +93,8 @@
               (reqPositions [_] (reset! called? true))
               (eDisconnect [_] nil)
               (reqAccountSummary [_ _ _ _] nil)
-              (cancelAccountSummary [_ _] nil))]
+              (cancelAccountSummary [_ _] nil)
+              (reqAccountUpdates [_ _ _] nil))]
       (is (true? (client/req-positions! {:client c})))
       (is (true? @called?))))
 
@@ -123,7 +125,8 @@
               (reqPositions [_] nil)
               (eDisconnect [_] (reset! called? true))
               (reqAccountSummary [_ _ _ _] nil)
-              (cancelAccountSummary [_ _] nil))
+              (cancelAccountSummary [_ _] nil)
+              (reqAccountUpdates [_ _ _] nil))
           bus (events/create-event-bus {:buffer-size 8 :overflow-strategy :sliding})
           conn {:client c
                 :events (:events bus)
@@ -141,7 +144,8 @@
               (eDisconnect [_] nil)
               (reqAccountSummary [_ req-id group tags]
                 (reset! seen [req-id group tags]))
-              (cancelAccountSummary [_ _] nil))]
+              (cancelAccountSummary [_ _] nil)
+              (reqAccountUpdates [_ _ _] nil))]
       (is (= 77 (client/req-account-summary! {:client c}
                                              {:req-id 77
                                               :group "All"
@@ -155,7 +159,8 @@
               (eDisconnect [_] nil)
               (reqAccountSummary [_ _ _ _] nil)
               (cancelAccountSummary [_ req-id]
-                (reset! seen req-id)))]
+                (reset! seen req-id))
+              (reqAccountUpdates [_ _ _] nil))]
       (is (true? (client/cancel-account-summary! {:client c} 31)))
       (is (= 31 @seen))))
 
@@ -164,8 +169,44 @@
               (reqPositions [_] nil)
               (eDisconnect [_] nil)
               (reqAccountSummary [_ _ _ _] nil)
-              (cancelAccountSummary [_ _] nil))]
+              (cancelAccountSummary [_ _] nil)
+              (reqAccountUpdates [_ _ _] nil))]
       (is (thrown? clojure.lang.ExceptionInfo
                    (client/req-account-summary! {:client c} {:group "All"})))
       (is (thrown? clojure.lang.ExceptionInfo
                    (client/cancel-account-summary! {:client c} nil))))))
+
+(deftest account-updates-req-cancel-test
+  (testing "req-account-updates! subscribes account stream"
+    (let [seen (atom nil)
+          c (reify IReqPosClient
+              (reqPositions [_] nil)
+              (eDisconnect [_] nil)
+              (reqAccountSummary [_ _ _ _] nil)
+              (cancelAccountSummary [_ _] nil)
+              (reqAccountUpdates [_ subscribe? account]
+                (reset! seen [subscribe? account])))]
+      (is (true? (client/req-account-updates! {:client c} {:account "DU123"})))
+      (is (= [true "DU123"] @seen))))
+
+  (testing "cancel-account-updates! unsubscribes"
+    (let [seen (atom nil)
+          c (reify IReqPosClient
+              (reqPositions [_] nil)
+              (eDisconnect [_] nil)
+              (reqAccountSummary [_ _ _ _] nil)
+              (cancelAccountSummary [_ _] nil)
+              (reqAccountUpdates [_ subscribe? account]
+                (reset! seen [subscribe? account])))]
+      (is (true? (client/cancel-account-updates! {:client c} "DU123")))
+      (is (= [false "DU123"] @seen))))
+
+  (testing "account-updates API validates account"
+    (let [c (reify IReqPosClient
+              (reqPositions [_] nil)
+              (eDisconnect [_] nil)
+              (reqAccountSummary [_ _ _ _] nil)
+              (cancelAccountSummary [_ _] nil)
+              (reqAccountUpdates [_ _ _] nil))]
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (client/req-account-updates! {:client c} {}))))))
