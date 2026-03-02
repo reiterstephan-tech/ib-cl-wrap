@@ -27,12 +27,29 @@ In `deps.edn` ist `lib/ibapi.jar` bereits in `:paths` eingetragen. Wenn die JAR 
 - `subscribe-events!` - liefert Subscriber-Channel fuer Events.
 - `unsubscribe-events!` - entfernt Subscriber-Channel.
 - `req-positions!` - triggert `reqPositions()`.
+- `req-account-summary!` - triggert `reqAccountSummary(reqId, group, tags)`.
+- `cancel-account-summary!` - triggert `cancelAccountSummary(reqId)`.
 - `dropped-event-count` - Anzahl nicht enqueueter Events.
+- `events-chan` - gibt den geteilten Event-Channel zurueck.
 
 ### Namespace `ib.positions`
 
 - `positions-snapshot!` - triggert `reqPositions()`, sammelt `:ib/position` bis `:ib/position-end`, liefert Ergebnis auf Channel.
 - `positions-snapshot-from-events!` - reine Collector-Funktion fuer simulierte Tests.
+
+### Namespace `ib.account`
+
+- `account-summary-snapshot!` - triggert `reqAccountSummary`, sammelt `:ib/account-summary` bis `:ib/account-summary-end` (fuer eine `req-id`) und cancelt die Subscription immer aktiv.
+- `account-summary-snapshot-from-events!` - Collector fuer simulierte Tests.
+- `next-req-id!` - erzeugt `req-id` fuer Snapshot-Anfragen.
+
+Default-Tags fuer Balances:
+- `NetLiquidation`
+- `TotalCashValue`
+- `AvailableFunds`
+- `BuyingPower`
+- `UnrealizedPnL`
+- `RealizedPnL`
 
 ### Namespace `ib.events`
 
@@ -47,6 +64,8 @@ Minimale Event-Typen:
 - `{:type :ib/error ...}`
 - `{:type :ib/position ...}`
 - `{:type :ib/position-end ...}`
+- `{:type :ib/account-summary :req-id <int> :account <string> :tag <string> :value <string> :currency <string> :ts <millis>}`
+- `{:type :ib/account-summary-end :req-id <int> :ts <millis>}`
 
 Contract-Normalisierung (stabil):
 - `:conId`
@@ -54,6 +73,8 @@ Contract-Normalisierung (stabil):
 - `:secType`
 - `:currency`
 - `:exchange`
+
+Account Summary ist in IB eine Subscription. Der Snapshot-Helper beendet sie aktiv mit `cancelAccountSummary` bei Erfolg und bei Timeout/Fehler.
 
 ## Overflow-Strategie
 
@@ -66,6 +87,7 @@ Das bedeutet: Bei vollem Puffer werden aeltere Events verworfen, neuere behalten
 ```clojure
 (require '[clojure.core.async :as async]
          '[ib.client :as ib]
+         '[ib.account :as acct]
          '[ib.positions :as pos])
 
 (def conn
@@ -84,11 +106,24 @@ Das bedeutet: Bei vollem Puffer werden aeltere Events verworfen, neuere behalten
 
 (def snapshot-ch (pos/positions-snapshot! conn {:timeout-ms 5000}))
 
+(def balance-ch
+  (acct/account-summary-snapshot!
+   conn
+   {:group "All"
+    :tags ["NetLiquidation" "TotalCashValue" "AvailableFunds" "BuyingPower" "UnrealizedPnL" "RealizedPnL"]
+    :timeout-ms 5000}))
+
 (async/go
   (let [result (async/<! snapshot-ch)]
     (if (= :ib/error (:type result))
       (println "Positions-Fehler:" result)
       (println "Positions-Snapshot:" result))))
+
+(async/go
+  (let [result (async/<! balance-ch)]
+    (if (:ok result)
+      (println "Balances:" (:values result))
+      (println "Account-Summary-Fehler:" result))))
 
 ;; spaeter
 (ib/unsubscribe-events! conn events-ch)
@@ -107,6 +142,7 @@ Getestet wird:
 - Contract-Normalisierung
 - Snapshot-Collector-Logik
 - Timeout-Verhalten
+- Account-Summary Event-Normalisierung und Snapshot-Timeout inkl. Cancel
 
 ## Hinweise Paper vs Live
 

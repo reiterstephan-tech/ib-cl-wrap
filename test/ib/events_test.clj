@@ -84,4 +84,17 @@
       (is (= :ib/error (:type evt)))
       (is (= "boom" (:message evt)))
       (is (= 1 (:id evt)))
-      (is (= 2 (:code evt))))))
+      (is (= 2 (:code evt)))))
+
+  (testing "account-summary->event normalizes payload"
+    (let [evt (events/account-summary->event {:req-id "5"
+                                              :account "DU123"
+                                              :tag "NetLiquidation"
+                                              :value "12345.67"
+                                              :currency "USD"})]
+      (is (= :ib/account-summary (:type evt)))
+      (is (= 5 (:req-id evt)))
+      (is (= "DU123" (:account evt)))
+      (is (= "NetLiquidation" (:tag evt)))
+      (is (= "12345.67" (:value evt)))
+      (is (= "USD" (:currency evt))))))

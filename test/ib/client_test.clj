@@ -6,7 +6,9 @@
 
 (definterface IReqPosClient
   (reqPositions [])
-  (eDisconnect []))
+  (eDisconnect [])
+  (reqAccountSummary [reqId group tags])
+  (cancelAccountSummary [reqId]))
 
 (definterface IStartApiClient
   (startAPI []))
@@ -88,7 +90,9 @@
     (let [called? (atom false)
           c (reify IReqPosClient
               (reqPositions [_] (reset! called? true))
-              (eDisconnect [_] nil))]
+              (eDisconnect [_] nil)
+              (reqAccountSummary [_ _ _ _] nil)
+              (cancelAccountSummary [_ _] nil))]
       (is (true? (client/req-positions! {:client c})))
       (is (true? @called?))))
 
@@ -117,7 +121,9 @@
     (let [called? (atom false)
           c (reify IReqPosClient
               (reqPositions [_] nil)
-              (eDisconnect [_] (reset! called? true)))
+              (eDisconnect [_] (reset! called? true))
+              (reqAccountSummary [_ _ _ _] nil)
+              (cancelAccountSummary [_ _] nil))
           bus (events/create-event-bus {:buffer-size 8 :overflow-strategy :sliding})
           conn {:client c
                 :events (:events bus)
@@ -126,3 +132,40 @@
       (is (true? (:disconnected? result)))
       (is (true? @called?))
       (is (false? (async/offer! (:events bus) {:type :x}))))))
+
+(deftest account-summary-req-cancel-test
+  (testing "req-account-summary! sends expected params and returns req-id"
+    (let [seen (atom nil)
+          c (reify IReqPosClient
+              (reqPositions [_] nil)
+              (eDisconnect [_] nil)
+              (reqAccountSummary [_ req-id group tags]
+                (reset! seen [req-id group tags]))
+              (cancelAccountSummary [_ _] nil))]
+      (is (= 77 (client/req-account-summary! {:client c}
+                                             {:req-id 77
+                                              :group "All"
+                                              :tags ["NetLiquidation" "BuyingPower"]})))
+      (is (= [77 "All" "NetLiquidation,BuyingPower"] @seen))))
+
+  (testing "cancel-account-summary! calls cancel"
+    (let [seen (atom nil)
+          c (reify IReqPosClient
+              (reqPositions [_] nil)
+              (eDisconnect [_] nil)
+              (reqAccountSummary [_ _ _ _] nil)
+              (cancelAccountSummary [_ req-id]
+                (reset! seen req-id)))]
+      (is (true? (client/cancel-account-summary! {:client c} 31)))
+      (is (= 31 @seen))))
+
+  (testing "account summary API validates req-id"
+    (let [c (reify IReqPosClient
+              (reqPositions [_] nil)
+              (eDisconnect [_] nil)
+              (reqAccountSummary [_ _ _ _] nil)
+              (cancelAccountSummary [_ _] nil))]
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (client/req-account-summary! {:client c} {:group "All"})))
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (client/cancel-account-summary! {:client c} nil))))))

@@ -158,6 +158,17 @@
    :position (parse-double-safe position)
    :avg-cost (parse-double-safe avg-cost)})
 
+(defn account-summary->event
+  "Build normalized `:ib/account-summary` event from IB callback payload."
+  [{:keys [req-id account tag value currency]}]
+  {:type :ib/account-summary
+   :ts (now-ms)
+   :req-id (parse-long-safe req-id)
+   :account (some-> account str)
+   :tag (some-> tag str)
+   :value (some-> value str)
+   :currency (some-> currency str)})
+
 (defn error->event
   "Build normalized `:ib/error` event from IB callback payload."
   [{:keys [id code message raw]}]

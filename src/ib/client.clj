@@ -4,6 +4,7 @@
   This namespace intentionally avoids static Java imports so test runs work
   without `lib/ibapi.jar` on the classpath."
   (:require [clojure.core.async :as async]
+            [clojure.string :as str]
             [ib.events :as events]))
 
 (def ^:private ib-class-names
@@ -83,6 +84,25 @@
         :message "Unknown IB error callback payload"
         :raw args}))))
 
+(def default-account-summary-group
+  "Default account summary group for reqAccountSummary."
+  "All")
+
+(def default-account-summary-tags
+  "Pragmatic default subset of account summary tags for balances."
+  ["NetLiquidation"
+   "TotalCashValue"
+   "AvailableFunds"
+   "BuyingPower"
+   "UnrealizedPnL"
+   "RealizedPnL"])
+
+(defn- normalize-account-summary-tags [tags]
+  (cond
+    (string? tags) tags
+    (sequential? tags) (str/join "," (map str tags))
+    :else (str/join "," default-account-summary-tags)))
+
 (defn- create-wrapper-proxy [publish!]
   (let [wrapper-class (resolve-class "com.ib.client.EWrapper")
         loader (.getClassLoader wrapper-class)
@@ -107,6 +127,21 @@
                         "positionEnd"
                         (publish! {:type :ib/position-end
                                    :ts (events/now-ms)})
+
+                        "accountSummary"
+                        (let [[req-id account tag value currency] argv]
+                          (publish!
+                           (events/account-summary->event
+                            {:req-id req-id
+                             :account account
+                             :tag tag
+                             :value value
+                             :currency currency})))
+
+                        "accountSummaryEnd"
+                        (publish! {:type :ib/account-summary-end
+                                   :ts (events/now-ms)
+                                   :req-id (first argv)})
 
                         "connectionClosed"
                         (publish! {:type :ib/disconnected
@@ -225,6 +260,42 @@
     (throw (ex-info "Connection map does not contain a client instance" {})))
   (invoke-method client "reqPositions")
   true)
+
+(defn req-account-summary!
+  "Trigger `reqAccountSummary(reqId, group, tags)` on the IB client.
+
+  Options:
+  - `:req-id` required integer request id
+  - `:group` default `\"All\"`
+  - `:tags` string (comma-separated) or sequence of tags"
+  [{:keys [client]} {:keys [req-id group tags]
+                     :or {group default-account-summary-group
+                          tags default-account-summary-tags}}]
+  (when-not client
+    (throw (ex-info "Connection map does not contain a client instance" {})))
+  (when-not (integer? req-id)
+    (throw (ex-info "req-account-summary! requires integer :req-id" {:req-id req-id})))
+  (invoke-method client
+                 "reqAccountSummary"
+                 (int req-id)
+                 (str group)
+                 (normalize-account-summary-tags tags))
+  req-id)
+
+(defn cancel-account-summary!
+  "Cancel account summary subscription with `cancelAccountSummary(reqId)`."
+  [{:keys [client]} req-id]
+  (when-not client
+    (throw (ex-info "Connection map does not contain a client instance" {})))
+  (when-not (integer? req-id)
+    (throw (ex-info "cancel-account-summary! requires integer req-id" {:req-id req-id})))
+  (invoke-method client "cancelAccountSummary" (int req-id))
+  true)
+
+(defn events-chan
+  "Return the shared event channel (primarily for diagnostics)."
+  [{:keys [events]}]
+  events)
 
 (defn subscribe-events!
   "Create a subscriber channel tapped to the event stream.
