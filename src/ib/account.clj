@@ -5,6 +5,7 @@
   subscription on every completion path (success, timeout, IB error)."
   (:require [clojure.core.async :as async]
             [ib.client :as client]
+            [ib.errors :as ib-errors]
             [ib.events :as events]))
 
 (def default-timeout-ms
@@ -31,13 +32,20 @@
   (assoc-in values [account tag] {:value value
                                   :currency currency}))
 
+(defn- matching-account-summary-error? [req-id event]
+  (and (= :ib/error (:type event))
+       (or (= req-id (:id event))
+           (= req-id (:request-id event))
+           (and (= :account-summary (get-in event [:request :type]))
+                (= req-id (get-in event [:request :req-id]))))))
+
 (defn account-summary-snapshot-from-events!
   "Collect `:ib/account-summary` events for one `req-id` until
   `:ib/account-summary-end` or timeout.
 
   Returns a channel with one map:
   - success: `{:ok true :req-id ... :values {...}}`
-  - error: `{:ok false :error ...}`"
+  - error: `{:ok false :error ...}` (with `:retryable?` for IB errors)"
   [events-ch {:keys [req-id timeout-ms]
               :or {timeout-ms default-timeout-ms}}]
   (let [out (async/chan 1)
@@ -62,13 +70,14 @@
                            :ts (events/now-ms)})
             (async/close! out))
 
-          (and (= :ib/error (:type value))
-               (= req-id (:id value)))
+          (matching-account-summary-error? req-id value)
           (do
             (async/>! out {:ok false
                            :error :ib-error
                            :req-id req-id
                            :ib-error value
+                           :retryable? (boolean (or (:retryable? value)
+                                                    (ib-errors/retryable-ib-error? (:code value))))
                            :ts (events/now-ms)})
             (async/close! out))
 

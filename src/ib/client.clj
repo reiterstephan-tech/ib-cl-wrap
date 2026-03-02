@@ -5,6 +5,7 @@
   without `lib/ibapi.jar` on the classpath."
   (:require [clojure.core.async :as async]
             [clojure.string :as str]
+            [ib.errors :as ib-errors]
             [ib.events :as events]))
 
 (def ^:private ib-class-names
@@ -103,7 +104,40 @@
     (sequential? tags) (str/join "," (map str tags))
     :else (str/join "," default-account-summary-tags)))
 
-(defn- create-wrapper-proxy [publish!]
+(defn register-request!
+  "Register request metadata for request-id based correlation."
+  [{:keys [request-registry]} req-id request]
+  (when-not request-registry
+    (throw (ex-info "Connection map missing :request-registry" {})))
+  (when-not (integer? req-id)
+    (throw (ex-info "register-request! requires integer req-id" {:req-id req-id})))
+  (swap! request-registry assoc req-id (assoc request
+                                              :req-id req-id
+                                              :registered-at (events/now-ms)))
+  req-id)
+
+(defn unregister-request!
+  "Remove request metadata for request-id based correlation."
+  [{:keys [request-registry]} req-id]
+  (when request-registry
+    (swap! request-registry dissoc req-id))
+  true)
+
+(defn request-context
+  "Fetch registered request metadata by req-id."
+  [{:keys [request-registry]} req-id]
+  (when request-registry
+    (get @request-registry req-id)))
+
+(defn- enrich-error-event [request-registry error-event]
+  (let [req-id (:id error-event)
+        request (when (integer? req-id)
+                  (get @request-registry req-id))]
+    (cond-> (assoc error-event :retryable? (ib-errors/retryable-ib-error? (:code error-event)))
+      request (assoc :request-id req-id
+                     :request request))))
+
+(defn- create-wrapper-proxy [publish! request-registry]
   (let [wrapper-class (resolve-class "com.ib.client.EWrapper")
         loader (.getClassLoader wrapper-class)
         interfaces (into-array Class [wrapper-class])
@@ -113,7 +147,8 @@
                           argv (vec (or args (object-array 0)))]
                       (case name
                         "error"
-                        (publish! (handler-error-event argv))
+                        (publish! (enrich-error-event request-registry
+                                                      (handler-error-event argv)))
 
                         "position"
                         (let [[account contract pos avg-cost] argv]
@@ -125,8 +160,7 @@
                              :avg-cost avg-cost})))
 
                         "positionEnd"
-                        (publish! {:type :ib/position-end
-                                   :ts (events/now-ms)})
+                        (publish! (events/position-end->event))
 
                         "accountSummary"
                         (let [[req-id account tag value currency] argv]
@@ -139,9 +173,35 @@
                              :currency currency})))
 
                         "accountSummaryEnd"
-                        (publish! {:type :ib/account-summary-end
-                                   :ts (events/now-ms)
-                                   :req-id (first argv)})
+                        (publish! (events/account-summary-end->event
+                                   {:req-id (first argv)}))
+
+                        "openOrder"
+                        (let [[order-id contract order order-state] argv]
+                          (publish! (events/open-order->event
+                                     {:order-id order-id
+                                      :contract contract
+                                      :order order
+                                      :order-state order-state})))
+
+                        "orderStatus"
+                        (let [[order-id status filled remaining avg-fill-price perm-id parent-id
+                               last-fill-price client-id why-held mkt-cap-price] argv]
+                          (publish! (events/order-status->event
+                                     {:order-id order-id
+                                      :status status
+                                      :filled filled
+                                      :remaining remaining
+                                      :avg-fill-price avg-fill-price
+                                      :perm-id perm-id
+                                      :parent-id parent-id
+                                      :client-id client-id
+                                      :last-fill-price last-fill-price
+                                      :why-held why-held
+                                      :mkt-cap-price mkt-cap-price})))
+
+                        "openOrderEnd"
+                        (publish! (events/open-order-end->event))
 
                         "updateAccountValue"
                         (let [[key value currency account] argv]
@@ -176,13 +236,12 @@
                           {:account (first argv)}))
 
                         "connectionClosed"
-                        (publish! {:type :ib/disconnected
-                                   :ts (events/now-ms)})
+                        (publish! (events/disconnected->event
+                                   {:reason :connection-closed}))
 
                         "nextValidId"
-                        (publish! {:type :ib/next-valid-id
-                                   :ts (events/now-ms)
-                                   :order-id (first argv)})
+                        (publish! (events/next-valid-id->event
+                                   {:order-id (first argv)}))
 
                         nil)
                       (default-for-return-type (.getReturnType method)))))]
@@ -231,7 +290,8 @@
   (let [{:keys [events events-mult dropped-events publish!]} (events/create-event-bus
                                                               {:buffer-size event-buffer-size
                                                                :overflow-strategy overflow-strategy})
-        wrapper (create-wrapper-proxy publish!)
+        request-registry (atom {})
+        wrapper (create-wrapper-proxy publish! request-registry)
         signal-class (resolve-class "com.ib.client.EJavaSignal")
         client-class (resolve-class "com.ib.client.EClientSocket")
         reader-class (resolve-class "com.ib.client.EReader")
@@ -258,21 +318,21 @@
                   :events-mult events-mult
                   :publish! publish!
                   :dropped-events dropped-events
+                  :request-registry request-registry
+                  :open-orders-snapshot-in-flight (atom false)
                   :overflow-strategy overflow-strategy}]
-        (publish! {:type :ib/connected
-                   :ts (events/now-ms)
-                   :host host
-                   :port port
-                   :client-id client-id})
+        (publish! (events/connected->event
+                   {:host host
+                    :port port
+                    :client-id client-id}))
         conn))))
 
 (defn disconnect!
   "Disconnect from IB and close event resources."
   [{:keys [client reader-thread publish! events] :as conn}]
   (when publish!
-    (publish! {:type :ib/disconnected
-               :ts (events/now-ms)
-               :reason :manual-disconnect}))
+    (publish! (events/disconnected->event
+               {:reason :manual-disconnect})))
   (when client
     (try
       (invoke-method client "eDisconnect")
@@ -293,6 +353,22 @@
   (invoke-method client "reqPositions")
   true)
 
+(defn req-open-orders!
+  "Trigger `reqOpenOrders()` on the IB client."
+  [{:keys [client]}]
+  (when-not client
+    (throw (ex-info "Connection map does not contain a client instance" {})))
+  (invoke-method client "reqOpenOrders")
+  true)
+
+(defn req-all-open-orders!
+  "Trigger `reqAllOpenOrders()` on the IB client."
+  [{:keys [client]}]
+  (when-not client
+    (throw (ex-info "Connection map does not contain a client instance" {})))
+  (invoke-method client "reqAllOpenOrders")
+  true)
+
 (defn req-account-summary!
   "Trigger `reqAccountSummary(reqId, group, tags)` on the IB client.
 
@@ -300,28 +376,37 @@
   - `:req-id` required integer request id
   - `:group` default `\"All\"`
   - `:tags` string (comma-separated) or sequence of tags"
-  [{:keys [client]} {:keys [req-id group tags]
-                     :or {group default-account-summary-group
-                          tags default-account-summary-tags}}]
+  [{:keys [client] :as conn} {:keys [req-id group tags]
+                              :or {group default-account-summary-group
+                                   tags default-account-summary-tags}}]
   (when-not client
     (throw (ex-info "Connection map does not contain a client instance" {})))
   (when-not (integer? req-id)
     (throw (ex-info "req-account-summary! requires integer :req-id" {:req-id req-id})))
-  (invoke-method client
-                 "reqAccountSummary"
-                 (int req-id)
-                 (str group)
-                 (normalize-account-summary-tags tags))
+  (let [tags-str (normalize-account-summary-tags tags)]
+    (register-request! conn req-id {:type :account-summary
+                                    :group group
+                                    :tags tags-str})
+    (try
+      (invoke-method client
+                     "reqAccountSummary"
+                     (int req-id)
+                     (str group)
+                     tags-str)
+      (catch Throwable t
+        (unregister-request! conn req-id)
+        (throw t))))
   req-id)
 
 (defn cancel-account-summary!
   "Cancel account summary subscription with `cancelAccountSummary(reqId)`."
-  [{:keys [client]} req-id]
+  [{:keys [client] :as conn} req-id]
   (when-not client
     (throw (ex-info "Connection map does not contain a client instance" {})))
   (when-not (integer? req-id)
     (throw (ex-info "cancel-account-summary! requires integer req-id" {:req-id req-id})))
   (invoke-method client "cancelAccountSummary" (int req-id))
+  (unregister-request! conn req-id)
   true)
 
 (defn req-account-updates!

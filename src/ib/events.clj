@@ -14,10 +14,39 @@
   `:dropping` keeps oldest events and drops newest when full."
   :sliding)
 
+(def event-schema-version
+  "Version of the normalized IB event contract."
+  "v1")
+
+(def default-event-source
+  "Default source marker for IB events."
+  :ib/tws)
+
 (defn now-ms
   "Return current timestamp in epoch milliseconds."
   []
   (System/currentTimeMillis))
+
+(defn base-event
+  "Create a base event map with the unified schema keys.
+
+  Required schema keys:
+  - `:type`
+  - `:source`
+  - `:status`
+  - `:request-id`
+  - `:ts`
+  - `:schema-version`"
+  [type {:keys [source status request-id]
+         :or {source default-event-source
+              status :ok
+              request-id nil}}]
+  {:type type
+   :source source
+   :status status
+   :request-id request-id
+   :ts (now-ms)
+   :schema-version event-schema-version})
 
 (defn- normalize-overflow-strategy [strategy]
   (if (#{:sliding :dropping} strategy)
@@ -109,6 +138,13 @@
                       (catch Throwable _ nil))
     :else (some-> value str parse-double-safe)))
 
+(defn- parse-boolean-safe [value]
+  (cond
+    (nil? value) nil
+    (instance? Boolean value) value
+    (string? value) (contains? #{"true" "1" "yes" "y"} (str/lower-case value))
+    :else (boolean value)))
+
 (defn contract->map
   "Normalize IB Contract data into a stable map.
 
@@ -148,71 +184,198 @@
                            (try-zero-arg-method contract "getExchange"))
                        str)}))
 
+(defn- order-field [order key-candidates method-candidates]
+  (cond
+    (map? order) (pick-value order key-candidates)
+    :else (some #(try-zero-arg-method order %) method-candidates)))
+
+(defn- order->map [order]
+  {:action (some-> (order-field order [:action "action"] ["action"]) str)
+   :orderType (some-> (order-field order [:orderType :order-type "orderType"] ["orderType"]) str)
+   :totalQuantity (parse-double-safe
+                   (order-field order
+                                [:totalQuantity :total-quantity "totalQuantity"]
+                                ["totalQuantity"]))
+   :lmtPrice (parse-double-safe
+              (order-field order
+                           [:lmtPrice :limit-price "lmtPrice"]
+                           ["lmtPrice"]))
+   :auxPrice (parse-double-safe
+              (order-field order
+                           [:auxPrice :aux-price "auxPrice"]
+                           ["auxPrice"]))
+   :tif (some-> (order-field order [:tif "tif"] ["tif"]) str)
+   :transmit (parse-boolean-safe
+              (order-field order [:transmit "transmit"] ["transmit"]))
+   :parentId (parse-long-safe
+              (order-field order [:parentId :parent-id "parentId"] ["parentId"]))})
+
+(defn- order-perm-id [order]
+  (parse-long-safe
+   (order-field order [:permId :perm-id "permId"] ["permId"])))
+
+(defn- order-account [order]
+  (some-> (order-field order [:account "account"] ["account"]) str))
+
+(defn- order-state-field [order-state key-candidates method-candidates]
+  (cond
+    (map? order-state) (pick-value order-state key-candidates)
+    :else (some #(try-zero-arg-method order-state %) method-candidates)))
+
+(defn- order-state->map [order-state]
+  {:status (some-> (order-state-field order-state [:status "status"] ["status"]) str)
+   :commission (parse-double-safe
+                (order-state-field order-state
+                                   [:commission "commission"]
+                                   ["commission"]))
+   :warningText (some-> (order-state-field order-state
+                                           [:warningText :warning-text "warningText"]
+                                           ["warningText"])
+                        str)})
+
 (defn position->event
   "Build normalized `:ib/position` event from IB callback payload."
   [{:keys [account contract position avg-cost]}]
-  {:type :ib/position
-   :ts (now-ms)
-   :account account
-   :contract (contract->map contract)
-   :position (parse-double-safe position)
-   :avg-cost (parse-double-safe avg-cost)})
+  (merge
+   (base-event :ib/position {:status :ok})
+   {:account account
+    :contract (contract->map contract)
+    :position (parse-double-safe position)
+    :avg-cost (parse-double-safe avg-cost)}))
 
 (defn account-summary->event
   "Build normalized `:ib/account-summary` event from IB callback payload."
   [{:keys [req-id account tag value currency]}]
-  {:type :ib/account-summary
-   :ts (now-ms)
-   :req-id (parse-long-safe req-id)
-   :account (some-> account str)
-   :tag (some-> tag str)
-   :value (some-> value str)
-   :currency (some-> currency str)})
+  (let [rid (parse-long-safe req-id)]
+    (merge
+     (base-event :ib/account-summary {:status :ok
+                                      :request-id rid})
+     {:req-id rid
+      :account (some-> account str)
+      :tag (some-> tag str)
+      :value (some-> value str)
+      :currency (some-> currency str)})))
 
 (defn update-account-value->event
   "Build normalized `:ib/update-account-value` event."
   [{:keys [key value currency account]}]
-  {:type :ib/update-account-value
-   :ts (now-ms)
-   :key (some-> key str)
-   :value (some-> value str)
-   :currency (some-> currency str)
-   :account (some-> account str)})
+  (merge
+   (base-event :ib/update-account-value {:status :ok})
+   {:key (some-> key str)
+    :value (some-> value str)
+    :currency (some-> currency str)
+    :account (some-> account str)}))
 
 (defn update-account-time->event
   "Build normalized `:ib/update-account-time` event."
   [{:keys [time]}]
-  {:type :ib/update-account-time
-   :ts (now-ms)
-   :time (some-> time str)})
+  (merge
+   (base-event :ib/update-account-time {:status :ok})
+   {:time (some-> time str)}))
 
 (defn update-portfolio->event
   "Build normalized `:ib/update-portfolio` event."
   [{:keys [contract position market-price market-value average-cost unrealized-pnl realized-pnl account]}]
-  {:type :ib/update-portfolio
-   :ts (now-ms)
-   :contract (contract->map contract)
-   :position (parse-double-safe position)
-   :market-price (parse-double-safe market-price)
-   :market-value (parse-double-safe market-value)
-   :average-cost (parse-double-safe average-cost)
-   :unrealized-pnl (parse-double-safe unrealized-pnl)
-   :realized-pnl (parse-double-safe realized-pnl)
-   :account (some-> account str)})
+  (merge
+   (base-event :ib/update-portfolio {:status :ok})
+   {:contract (contract->map contract)
+    :position (parse-double-safe position)
+    :market-price (parse-double-safe market-price)
+    :market-value (parse-double-safe market-value)
+    :average-cost (parse-double-safe average-cost)
+    :unrealized-pnl (parse-double-safe unrealized-pnl)
+    :realized-pnl (parse-double-safe realized-pnl)
+    :account (some-> account str)}))
 
 (defn account-download-end->event
   "Build normalized `:ib/account-download-end` event."
   [{:keys [account]}]
-  {:type :ib/account-download-end
-   :ts (now-ms)
-   :account (some-> account str)})
+  (merge
+   (base-event :ib/account-download-end {:status :ok})
+   {:account (some-> account str)}))
+
+(defn account-summary-end->event
+  "Build normalized `:ib/account-summary-end` event."
+  [{:keys [req-id]}]
+  (let [rid (parse-long-safe req-id)]
+    (merge
+     (base-event :ib/account-summary-end {:status :ok
+                                          :request-id rid})
+     {:req-id rid})))
+
+(defn position-end->event
+  "Build normalized `:ib/position-end` event."
+  []
+  (base-event :ib/position-end {:status :ok}))
+
+(defn connected->event
+  "Build normalized `:ib/connected` event."
+  [{:keys [host port client-id]}]
+  (merge
+   (base-event :ib/connected {:status :ok})
+   {:host host
+    :port port
+    :client-id client-id}))
+
+(defn disconnected->event
+  "Build normalized `:ib/disconnected` event."
+  [{:keys [reason]}]
+  (merge
+   (base-event :ib/disconnected {:status :ok})
+   {:reason reason}))
+
+(defn next-valid-id->event
+  "Build normalized `:ib/next-valid-id` event."
+  [{:keys [order-id]}]
+  (merge
+   (base-event :ib/next-valid-id {:status :ok})
+   {:order-id order-id}))
+
+(defn open-order->event
+  "Build normalized `:ib/open-order` event."
+  [{:keys [order-id contract order order-state]}]
+  (let [oid (parse-long-safe order-id)]
+    (merge
+     (base-event :ib/open-order {:status :ok})
+     {:order-id oid
+      :perm-id (order-perm-id order)
+      :account (order-account order)
+      :contract (contract->map contract)
+      :order (order->map order)
+      :order-state (order-state->map order-state)})))
+
+(defn order-status->event
+  "Build normalized `:ib/order-status` event."
+  [{:keys [order-id status filled remaining avg-fill-price perm-id parent-id client-id
+           last-fill-price why-held mkt-cap-price]}]
+  (let [oid (parse-long-safe order-id)]
+    (merge
+     (base-event :ib/order-status {:status :ok})
+     {:order-id oid
+      :status-text (some-> status str)
+      :filled (parse-double-safe filled)
+      :remaining (parse-double-safe remaining)
+      :avgFillPrice (parse-double-safe avg-fill-price)
+      :permId (parse-long-safe perm-id)
+      :parentId (parse-long-safe parent-id)
+      :clientId (parse-long-safe client-id)
+      :lastFillPrice (parse-double-safe last-fill-price)
+      :whyHeld (some-> why-held str)
+      :mktCapPrice (parse-double-safe mkt-cap-price)})))
+
+(defn open-order-end->event
+  "Build normalized `:ib/open-order-end` event."
+  []
+  (base-event :ib/open-order-end {:status :ok}))
 
 (defn error->event
   "Build normalized `:ib/error` event from IB callback payload."
   [{:keys [id code message raw]}]
-  {:type :ib/error
-   :ts (now-ms)
-   :id id
-   :code code
-   :message (some-> message str/trim)
-   :raw raw})
+  (let [request-id (parse-long-safe id)]
+    (merge
+     (base-event :ib/error {:status :error
+                            :request-id request-id})
+     {:id id
+      :code code
+      :message (some-> message str/trim)
+      :raw raw})))
