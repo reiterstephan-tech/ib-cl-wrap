@@ -74,7 +74,14 @@
 (s/def :ib.event/host string?)
 (s/def :ib.event/port :ib/port)
 (s/def :ib.event/client-id (s/nilable int?))
-(s/def :ib.event/order-status-text (s/nilable string?))
+(s/def :ib.event/status-text (s/nilable string?))
+(s/def :ib.event/filled (s/nilable number?))
+(s/def :ib.event/remaining (s/nilable number?))
+(s/def :ib.event/avg-fill-price (s/nilable number?))
+(s/def :ib.event/parent-id (s/nilable int?))
+(s/def :ib.event/last-fill-price (s/nilable number?))
+(s/def :ib.event/why-held (s/nilable string?))
+(s/def :ib.event/mkt-cap-price (s/nilable number?))
 (s/def :ib.event/floating (s/nilable number?))
 
 (s/def :ib.order/action (s/nilable string?))
@@ -160,8 +167,16 @@
 
 (defmethod event-dispatch :ib/order-status [_]
   (s/and :ib.event/base
-         (s/keys :req-un [:ib.event/order-id :ib.event/order-status-text]
-                 :opt-un [:ib.event/client-id])))
+         (s/keys :req-un [:ib.event/order-id :ib.event/status-text]
+                 :opt-un [:ib.event/filled
+                          :ib.event/remaining
+                          :ib.event/avg-fill-price
+                          :ib.event/perm-id
+                          :ib.event/parent-id
+                          :ib.event/client-id
+                          :ib.event/last-fill-price
+                          :ib.event/why-held
+                          :ib.event/mkt-cap-price])))
 
 (defmethod event-dispatch :ib/open-order-end [_]
   :ib.event/base)

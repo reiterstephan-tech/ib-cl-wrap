@@ -38,7 +38,7 @@ All events include envelope keys:
   - Keys: `:order-id`, `:perm-id`, `:account`, `:contract`, `:order`, `:order-state`
 
 - `:ib/order-status`
-  - Keys: `:order-id`, `:status-text`, `:filled`, `:remaining`, `:avgFillPrice`, `:permId`, `:parentId`, `:clientId`, `:lastFillPrice`, `:whyHeld`, `:mktCapPrice`
+  - Keys: `:order-id`, `:status-text`, `:filled`, `:remaining`, `:avg-fill-price`, `:perm-id`, `:parent-id`, `:client-id`, `:last-fill-price`, `:why-held`, `:mkt-cap-price`
 
 - `:ib/open-order-end`
   - No additional payload keys.

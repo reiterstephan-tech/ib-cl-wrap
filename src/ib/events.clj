@@ -355,13 +355,13 @@
       :status-text (some-> status str)
       :filled (parse-double-safe filled)
       :remaining (parse-double-safe remaining)
-      :avgFillPrice (parse-double-safe avg-fill-price)
-      :permId (parse-long-safe perm-id)
-      :parentId (parse-long-safe parent-id)
-      :clientId (parse-long-safe client-id)
-      :lastFillPrice (parse-double-safe last-fill-price)
-      :whyHeld (some-> why-held str)
-      :mktCapPrice (parse-double-safe mkt-cap-price)})))
+      :avg-fill-price (parse-double-safe avg-fill-price)
+      :perm-id (parse-long-safe perm-id)
+      :parent-id (parse-long-safe parent-id)
+      :client-id (parse-long-safe client-id)
+      :last-fill-price (parse-double-safe last-fill-price)
+      :why-held (some-> why-held str)
+      :mkt-cap-price (parse-double-safe mkt-cap-price)})))
 
 (defn open-order-end->event
   "Build normalized `:ib/open-order-end` event."
