@@ -70,6 +70,16 @@
           :message message
           :raw args}))
 
+      ;; TWS API 10.19+: error(int id, long errorCode, int errorCount, String errorMsg, String advancedOrderRejectJson)
+      (= argc 5)
+      (let [[id code _error-count message extra] args]
+        (events/error->event
+         {:id id
+          :code code
+          :message message
+          :raw extra}))
+
+      ;; Older API: error(int id, int errorCode, String errorMsg, String advancedOrderRejectJson)
       (>= argc 4)
       (let [[id code message extra] args]
         (events/error->event
