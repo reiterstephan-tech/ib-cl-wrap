@@ -34,6 +34,10 @@
 (s/def :ib/mode #{:open :all})
 (s/def :ib/tap-buffer-size (s/and int? pos?))
 (s/def :ib/event-buffer-size (s/and int? pos?))
+(s/def :ib/auto-reconnect? boolean?)
+(s/def :ib/max-attempts (s/and int? pos?))
+(s/def :ib/initial-delay-ms (s/and int? pos?))
+(s/def :ib/max-delay-ms (s/and int? pos?))
 (s/def :ib/ok boolean?)
 (s/def :ib/values map?)
 (s/def :ib/orders (s/coll-of :ib.result/open-order :kind vector?))
@@ -83,6 +87,9 @@
 (s/def :ib.event/why-held (s/nilable string?))
 (s/def :ib.event/mkt-cap-price (s/nilable number?))
 (s/def :ib.event/floating (s/nilable number?))
+(s/def :ib.event/attempt (s/and int? pos?))
+(s/def :ib.event/attempts (s/and int? (complement neg?)))
+(s/def :ib.event/delay-ms (s/and int? (complement neg?)))
 
 (s/def :ib.order/action (s/nilable string?))
 (s/def :ib.order/orderType (s/nilable string?))
@@ -181,6 +188,18 @@
 (defmethod event-dispatch :ib/open-order-end [_]
   :ib.event/base)
 
+(defmethod event-dispatch :ib/reconnecting [_]
+  (s/and :ib.event/base
+         (s/keys :req-un [:ib.event/attempt :ib.event/delay-ms])))
+
+(defmethod event-dispatch :ib/reconnected [_]
+  (s/and :ib.event/base
+         (s/keys :req-un [:ib.event/host :ib.event/port :ib.event/client-id :ib.event/attempt])))
+
+(defmethod event-dispatch :ib/reconnect-failed [_]
+  (s/and :ib.event/base
+         (s/keys :req-un [:ib.event/attempts])))
+
 (defmethod event-dispatch :default [_]
   :ib.event/base)
 
@@ -215,8 +234,11 @@
   (s/or :ok :ib.result/open-orders-ok
         :error :ib.result/open-orders-error))
 
+(s/def :ib.config/reconnect-opts
+  (s/keys :opt-un [:ib/max-attempts :ib/initial-delay-ms :ib/max-delay-ms]))
 (s/def :ib.config/connect-opts
-  (s/keys :opt-un [:ib/host :ib/port :ib/client-id :ib/event-buffer-size :ib/overflow-strategy]))
+  (s/keys :opt-un [:ib/host :ib/port :ib/client-id :ib/event-buffer-size
+                   :ib/overflow-strategy :ib/auto-reconnect? :ib.config/reconnect-opts]))
 (s/def :ib.config/subscribe-opts
   (s/keys :opt-un [:ib/buffer-size :ib/tap-buffer-size]))
 (s/def :ib.config/positions-opts
@@ -236,6 +258,7 @@
 (s/def :ib.conn/with-events (s/and map? #(contains? % :events-mult)))
 (s/def :ib.conn/with-request-registry (s/and map? #(contains? % :request-registry)))
 (s/def :ib.conn/with-open-orders-guard (s/and map? #(contains? % :open-orders-snapshot-in-flight)))
+(s/def :ib.conn/with-reconnect-guard (s/and map? #(contains? % :reconnecting?)))
 (s/def :ib.conn/any map?)
 
 (s/fdef ib.client/connect!

@@ -72,7 +72,7 @@
               (waitForSignal [_] nil))
           r (reify IReader
               (processMsgs [_] nil))
-          t (#'ib.client/start-reader-loop! c s r publish!)]
+          t (#'ib.client/start-reader-loop! c s r publish! nil)]
       (.join ^Thread t 200)
       (is (not (.isAlive ^Thread t)))
       (is (empty? @publish-events)))))
@@ -99,7 +99,7 @@
               (reqAccountSummary [_ _ _ _] nil)
               (cancelAccountSummary [_ _] nil)
               (reqAccountUpdates [_ _ _] nil))]
-      (is (true? (client/req-positions! {:client c})))
+      (is (true? (client/req-positions! {:client (atom c)})))
       (is (true? @called?))))
 
   (testing "req-positions! fails with missing client"
@@ -134,7 +134,9 @@
               (cancelAccountSummary [_ _] nil)
               (reqAccountUpdates [_ _ _] nil))
           bus (events/create-event-bus {:buffer-size 8 :overflow-strategy :sliding})
-          conn {:client c
+          conn {:client (atom c)
+                :reader-thread (atom nil)
+                :manual-disconnect? (atom false)
                 :events (:events bus)
                 :publish! (:publish! bus)}
           result (client/disconnect! conn)]
@@ -155,7 +157,7 @@
                 (reset! seen [req-id group tags]))
               (cancelAccountSummary [_ _] nil)
               (reqAccountUpdates [_ _ _] nil))]
-      (is (= 77 (client/req-account-summary! {:client c :request-registry registry}
+      (is (= 77 (client/req-account-summary! {:client (atom c) :request-registry registry}
                                              {:req-id 77
                                               :group "All"
                                               :tags ["NetLiquidation" "BuyingPower"]})))
@@ -173,7 +175,7 @@
               (cancelAccountSummary [_ req-id]
                 (reset! seen req-id))
               (reqAccountUpdates [_ _ _] nil))]
-      (is (true? (client/cancel-account-summary! {:client c :request-registry registry} 31)))
+      (is (true? (client/cancel-account-summary! {:client (atom c) :request-registry registry} 31)))
       (is (= 31 @seen))
       (is (nil? (get @registry 31)))))
 
@@ -187,9 +189,9 @@
               (cancelAccountSummary [_ _] nil)
               (reqAccountUpdates [_ _ _] nil))]
       (is (thrown? clojure.lang.ExceptionInfo
-                   (client/req-account-summary! {:client c :request-registry (atom {})} {:group "All"})))
+                   (client/req-account-summary! {:client (atom c) :request-registry (atom {})} {:group "All"})))
       (is (thrown? clojure.lang.ExceptionInfo
-                   (client/cancel-account-summary! {:client c :request-registry (atom {})} nil)))))
+                   (client/cancel-account-summary! {:client (atom c) :request-registry (atom {})} nil)))))
 
 (deftest request-correlation-helpers-test
   (let [registry (atom {})
@@ -202,7 +204,7 @@
       (is (= :account-summary (get-in evt [:request :type])))
       (is (true? (:retryable? evt))))
     (client/unregister-request! conn 99)
-    (is (nil? (client/request-context conn 99)))))
+    (is (nil? (client/request-context conn 99))))))
 
 (deftest account-updates-req-cancel-test
   (testing "req-account-updates! subscribes account stream"
@@ -216,7 +218,7 @@
               (cancelAccountSummary [_ _] nil)
               (reqAccountUpdates [_ subscribe? account]
                 (reset! seen [subscribe? account])))]
-      (is (true? (client/req-account-updates! {:client c} {:account "DU123"})))
+      (is (true? (client/req-account-updates! {:client (atom c)} {:account "DU123"})))
       (is (= [true "DU123"] @seen))))
 
   (testing "cancel-account-updates! unsubscribes"
@@ -230,7 +232,7 @@
               (cancelAccountSummary [_ _] nil)
               (reqAccountUpdates [_ subscribe? account]
                 (reset! seen [subscribe? account])))]
-      (is (true? (client/cancel-account-updates! {:client c} "DU123")))
+      (is (true? (client/cancel-account-updates! {:client (atom c)} "DU123")))
       (is (= [false "DU123"] @seen))))
 
   (testing "account-updates API validates account"
@@ -243,7 +245,7 @@
               (cancelAccountSummary [_ _] nil)
               (reqAccountUpdates [_ _ _] nil))]
       (is (thrown? clojure.lang.ExceptionInfo
-                   (client/req-account-updates! {:client c} {})))))))
+                   (client/req-account-updates! {:client (atom c)} {}))))))
 
 (deftest open-orders-request-api-test
   (testing "req-open-orders! and req-all-open-orders! invoke IB client methods"
@@ -256,8 +258,8 @@
               (reqAccountSummary [_ _ _ _] nil)
               (cancelAccountSummary [_ _] nil)
               (reqAccountUpdates [_ _ _] nil))]
-      (is (true? (client/req-open-orders! {:client c})))
-      (is (true? (client/req-all-open-orders! {:client c})))
+      (is (true? (client/req-open-orders! {:client (atom c)})))
+      (is (true? (client/req-all-open-orders! {:client (atom c)})))
       (is (= [:open :all] @calls))))
 
   (testing "open orders request API fails with missing client"
@@ -265,3 +267,105 @@
                  (client/req-open-orders! {})))
     (is (thrown? clojure.lang.ExceptionInfo
                  (client/req-all-open-orders! {})))))
+
+(deftest reconnect-on-disconnect-callback-test
+  (testing "on-disconnect callback fires when reader thread exits"
+    (let [callback-fired? (atom false)
+          on-disconnect (fn [] (reset! callback-fired? true))
+          publish! (fn [_] nil)
+          c (reify ILoopClient
+              (isConnected [_] false))
+          s (reify ISignal
+              (waitForSignal [_] nil))
+          r (reify IReader
+              (processMsgs [_] nil))
+          t (#'ib.client/start-reader-loop! c s r publish! on-disconnect)]
+      (.join ^Thread t 200)
+      (is (not (.isAlive ^Thread t)))
+      (is (true? @callback-fired?)))))
+
+(deftest reconnect-loop-aborts-on-manual-disconnect-test
+  (testing "start-reconnect-loop! aborts immediately when manual-disconnect? is true"
+    (let [published (atom [])
+          publish! (fn [e] (swap! published conj e))
+          manual-disconnect? (atom true)
+          reconnecting? (atom true)
+          conn {:publish! publish!
+                :manual-disconnect? manual-disconnect?
+                :reconnecting? reconnecting?
+                :host "127.0.0.1"
+                :port 7497
+                :client-id 0
+                :reconnect-opts {:max-attempts 3
+                                 :initial-delay-ms 1
+                                 :max-delay-ms 10}}]
+      (#'ib.client/start-reconnect-loop! conn nil)
+      (Thread/sleep 50)
+      (is (empty? @published))
+      (is (false? @reconnecting?)))))
+
+(deftest reconnect-loop-max-attempts-test
+  (testing "start-reconnect-loop! emits reconnect-failed after max attempts exhausted"
+    (with-redefs [ib.client/attempt-reconnect! (fn [_ _] nil)]
+      (let [published (atom [])
+            publish! (fn [e] (swap! published conj e))
+            manual-disconnect? (atom false)
+            reconnecting? (atom true)
+            conn {:publish! publish!
+                  :manual-disconnect? manual-disconnect?
+                  :reconnecting? reconnecting?
+                  :host "127.0.0.1"
+                  :port 7497
+                  :client-id 0
+                  :reconnect-opts {:max-attempts 2
+                                   :initial-delay-ms 1
+                                   :max-delay-ms 10}}]
+        (#'ib.client/start-reconnect-loop! conn nil)
+        (Thread/sleep 300)
+        (let [types (mapv :type @published)]
+          (is (= 2 (count (filter #(= % :ib/reconnecting) types))))
+          (is (= :ib/reconnect-failed (last types)))
+          (is (false? @reconnecting?)))))))
+
+(deftest reconnect-loop-succeeds-on-second-attempt-test
+  (testing "start-reconnect-loop! succeeds on second attempt and updates conn atoms"
+    (let [attempt-count (atom 0)
+          mock-client (Object.)
+          mock-reader (Object.)
+          mock-thread (Thread. (fn []))
+          published (atom [])
+          publish! (fn [e] (swap! published conj e))
+          manual-disconnect? (atom false)
+          reconnecting? (atom true)
+          client-atom (atom nil)
+          reader-atom (atom nil)
+          reader-thread-atom (atom nil)
+          conn {:publish! publish!
+                :manual-disconnect? manual-disconnect?
+                :reconnecting? reconnecting?
+                :client client-atom
+                :reader reader-atom
+                :reader-thread reader-thread-atom
+                :host "127.0.0.1"
+                :port 7497
+                :client-id 0
+                :reconnect-opts {:max-attempts 3
+                                 :initial-delay-ms 1
+                                 :max-delay-ms 10}}]
+      (with-redefs [ib.client/attempt-reconnect!
+                    (fn [_ _]
+                      (swap! attempt-count inc)
+                      (if (= @attempt-count 1)
+                        nil
+                        {:client mock-client
+                         :reader mock-reader
+                         :reader-thread mock-thread}))]
+        (#'ib.client/start-reconnect-loop! conn nil)
+        (Thread/sleep 300)
+        (let [types (mapv :type @published)]
+          (is (= 2 (count (filter #(= % :ib/reconnecting) types))))
+          (is (= :ib/reconnected (last types)))
+          (is (false? @reconnecting?))
+          (is (identical? mock-client @client-atom))
+          (is (identical? mock-reader @reader-atom))
+          (is (identical? mock-thread @reader-thread-atom)))))))

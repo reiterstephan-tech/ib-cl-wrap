@@ -70,6 +70,16 @@
           :message message
           :raw args}))
 
+      ;; TWS API 10.19+: error(int id, long errorCode, int errorCount, String errorMsg, String advancedOrderRejectJson)
+      (= argc 5)
+      (let [[id code _error-count message extra] args]
+        (events/error->event
+         {:id id
+          :code code
+          :message message
+          :raw extra}))
+
+      ;; Older API: error(int id, int errorCode, String errorMsg, String advancedOrderRejectJson)
       (>= argc 4)
       (let [[id code message extra] args]
         (events/error->event
@@ -247,7 +257,7 @@
                       (default-for-return-type (.getReturnType method)))))]
     (java.lang.reflect.Proxy/newProxyInstance loader interfaces handler)))
 
-(defn- start-reader-loop! [client signal reader publish!]
+(defn- start-reader-loop! [client signal reader publish! on-disconnect]
   (doto
    (Thread.
     (fn []
@@ -264,10 +274,72 @@
         (catch Throwable t
           (publish! (events/error->event
                      {:message "Reader thread crashed"
-                      :raw t}))))))
+                      :raw t})))
+        (finally
+          (when on-disconnect
+            (on-disconnect))))))
    (.setName "ib-reader-loop")
    (.setDaemon true)
    (.start)))
+
+(declare start-reconnect-loop!)
+
+(defn- attempt-reconnect! [conn on-disconnect]
+  (let [{:keys [host port client-id publish! request-registry]} conn
+        signal-class (resolve-class "com.ib.client.EJavaSignal")
+        client-class (resolve-class "com.ib.client.EClientSocket")
+        reader-class (resolve-class "com.ib.client.EReader")
+        wrapper (create-wrapper-proxy publish! request-registry)
+        signal (new-instance signal-class [])
+        client (new-instance client-class [wrapper signal])]
+    (try
+      (invoke-method client "eConnect" host (int port) (int client-id))
+      (if (invoke-method client "isConnected")
+        (let [reader (new-instance reader-class [client signal])]
+          (invoke-method reader "start")
+          (maybe-start-api! client)
+          (let [reader-thread (start-reader-loop! client signal reader publish! on-disconnect)]
+            {:client client
+             :reader reader
+             :reader-thread reader-thread}))
+        nil)
+      (catch Throwable _
+        nil))))
+
+(defn- start-reconnect-loop! [conn on-disconnect]
+  (let [{:keys [publish! manual-disconnect? reconnecting? host port client-id reconnect-opts]} conn
+        {:keys [max-attempts initial-delay-ms max-delay-ms]} reconnect-opts]
+    (async/go-loop [attempt 1
+                    delay-ms initial-delay-ms]
+      (cond
+        @manual-disconnect?
+        (reset! reconnecting? false)
+
+        (> attempt max-attempts)
+        (do
+          (publish! (events/reconnect-failed->event {:attempts (dec attempt)}))
+          (reset! reconnecting? false))
+
+        :else
+        (do
+          (publish! (events/reconnecting->event {:attempt attempt :delay-ms delay-ms}))
+          (async/<! (async/timeout delay-ms))
+          (if @manual-disconnect?
+            (reset! reconnecting? false)
+            (let [result (async/<! (async/thread (attempt-reconnect! conn on-disconnect)))]
+              (if result
+                (do
+                  (reset! (:client conn) (:client result))
+                  (reset! (:reader conn) (:reader result))
+                  (reset! (:reader-thread conn) (:reader-thread result))
+                  (reset! reconnecting? false)
+                  (publish! (events/reconnected->event
+                             {:host host
+                              :port port
+                              :client-id client-id
+                              :attempt attempt})))
+                (recur (inc attempt)
+                       (min max-delay-ms (* 2 delay-ms)))))))))))
 
 (defn connect!
   "Connect to TWS or IB Gateway.
@@ -278,14 +350,19 @@
   - `:client-id` (default `0`)
   - `:event-buffer-size` (default 1024)
   - `:overflow-strategy` one of `:sliding` or `:dropping` (default `:sliding`)
+  - `:auto-reconnect?` whether to auto-reconnect on drop (default `false`)
+  - `:reconnect-opts` map with `:max-attempts` (default 10), `:initial-delay-ms` (default 1000),
+    `:max-delay-ms` (default 60000)
 
   Returns connection map used by other functions in this namespace."
-  [{:keys [host port client-id event-buffer-size overflow-strategy]
+  [{:keys [host port client-id event-buffer-size overflow-strategy auto-reconnect? reconnect-opts]
     :or {host "127.0.0.1"
          port 7497
          client-id 0
          event-buffer-size events/default-event-buffer-size
-         overflow-strategy events/default-overflow-strategy}}]
+         overflow-strategy events/default-overflow-strategy
+         auto-reconnect? false
+         reconnect-opts {}}}]
   (ensure-ib-classes!)
   (let [{:keys [events events-mult dropped-events publish!]} (events/create-event-bus
                                                               {:buffer-size event-buffer-size
@@ -296,50 +373,71 @@
         client-class (resolve-class "com.ib.client.EClientSocket")
         reader-class (resolve-class "com.ib.client.EReader")
         signal (new-instance signal-class [])
-        client (new-instance client-class [wrapper signal])]
-    (invoke-method client "eConnect" host (int port) (int client-id))
-    (when-not (invoke-method client "isConnected")
+        client-obj (new-instance client-class [wrapper signal])]
+    (invoke-method client-obj "eConnect" host (int port) (int client-id))
+    (when-not (invoke-method client-obj "isConnected")
       (throw (ex-info "Failed to connect to IB TWS/Gateway"
                       {:host host
                        :port port
                        :client-id client-id})))
-    (let [reader (new-instance reader-class [client signal])]
-      (invoke-method reader "start")
-      (maybe-start-api! client)
-      (let [reader-thread (start-reader-loop! client signal reader publish!)
-            conn {:host host
-                  :port port
-                  :client-id client-id
-                  :client client
-                  :signal signal
-                  :reader reader
-                  :reader-thread reader-thread
-                  :events events
-                  :events-mult events-mult
-                  :publish! publish!
-                  :dropped-events dropped-events
-                  :request-registry request-registry
-                  :open-orders-snapshot-in-flight (atom false)
-                  :overflow-strategy overflow-strategy}]
-        (publish! (events/connected->event
-                   {:host host
-                    :port port
-                    :client-id client-id}))
-        conn))))
+    (let [reader-obj (new-instance reader-class [client-obj signal])
+          _ (invoke-method reader-obj "start")
+          _ (maybe-start-api! client-obj)
+          client-atom (atom client-obj)
+          reader-atom (atom reader-obj)
+          reader-thread-atom (atom nil)
+          manual-disconnect? (atom false)
+          reconnecting? (atom false)
+          merged-reconnect-opts (merge {:max-attempts 10
+                                        :initial-delay-ms 1000
+                                        :max-delay-ms 60000}
+                                       reconnect-opts)
+          conn {:host host
+                :port port
+                :client-id client-id
+                :client client-atom
+                :signal signal
+                :reader reader-atom
+                :reader-thread reader-thread-atom
+                :manual-disconnect? manual-disconnect?
+                :reconnecting? reconnecting?
+                :auto-reconnect? auto-reconnect?
+                :reconnect-opts merged-reconnect-opts
+                :events events
+                :events-mult events-mult
+                :publish! publish!
+                :dropped-events dropped-events
+                :request-registry request-registry
+                :open-orders-snapshot-in-flight (atom false)
+                :overflow-strategy overflow-strategy}]
+      (letfn [(on-disconnect []
+                (when (and (not @manual-disconnect?)
+                           (compare-and-set! reconnecting? false true))
+                  (start-reconnect-loop! conn on-disconnect)))]
+        (let [reader-thread (start-reader-loop! client-obj signal reader-obj publish!
+                                               (when auto-reconnect? on-disconnect))]
+          (reset! reader-thread-atom reader-thread)
+          (publish! (events/connected->event
+                     {:host host
+                      :port port
+                      :client-id client-id}))
+          conn)))))
 
 (defn disconnect!
   "Disconnect from IB and close event resources."
-  [{:keys [client reader-thread publish! events] :as conn}]
+  [{:keys [client reader-thread manual-disconnect? publish! events] :as conn}]
+  (when manual-disconnect?
+    (reset! manual-disconnect? true))
   (when publish!
     (publish! (events/disconnected->event
                {:reason :manual-disconnect})))
   (when client
     (try
-      (invoke-method client "eDisconnect")
+      (invoke-method @client "eDisconnect")
       (catch Throwable _ nil)))
   (when reader-thread
     (try
-      (.interrupt ^Thread reader-thread)
+      (.interrupt ^Thread @reader-thread)
       (catch Throwable _ nil)))
   (when events
     (async/close! events))
@@ -348,25 +446,25 @@
 (defn req-positions!
   "Trigger `reqPositions()` on the IB client."
   [{:keys [client]}]
-  (when-not client
+  (when-not (some-> client deref)
     (throw (ex-info "Connection map does not contain a client instance" {})))
-  (invoke-method client "reqPositions")
+  (invoke-method @client "reqPositions")
   true)
 
 (defn req-open-orders!
   "Trigger `reqOpenOrders()` on the IB client."
   [{:keys [client]}]
-  (when-not client
+  (when-not (some-> client deref)
     (throw (ex-info "Connection map does not contain a client instance" {})))
-  (invoke-method client "reqOpenOrders")
+  (invoke-method @client "reqOpenOrders")
   true)
 
 (defn req-all-open-orders!
   "Trigger `reqAllOpenOrders()` on the IB client."
   [{:keys [client]}]
-  (when-not client
+  (when-not (some-> client deref)
     (throw (ex-info "Connection map does not contain a client instance" {})))
-  (invoke-method client "reqAllOpenOrders")
+  (invoke-method @client "reqAllOpenOrders")
   true)
 
 (defn req-account-summary!
@@ -379,7 +477,7 @@
   [{:keys [client] :as conn} {:keys [req-id group tags]
                               :or {group default-account-summary-group
                                    tags default-account-summary-tags}}]
-  (when-not client
+  (when-not (some-> client deref)
     (throw (ex-info "Connection map does not contain a client instance" {})))
   (when-not (integer? req-id)
     (throw (ex-info "req-account-summary! requires integer :req-id" {:req-id req-id})))
@@ -388,7 +486,7 @@
                                     :group group
                                     :tags tags-str})
     (try
-      (invoke-method client
+      (invoke-method @client
                      "reqAccountSummary"
                      (int req-id)
                      (str group)
@@ -401,11 +499,11 @@
 (defn cancel-account-summary!
   "Cancel account summary subscription with `cancelAccountSummary(reqId)`."
   [{:keys [client] :as conn} req-id]
-  (when-not client
+  (when-not (some-> client deref)
     (throw (ex-info "Connection map does not contain a client instance" {})))
   (when-not (integer? req-id)
     (throw (ex-info "cancel-account-summary! requires integer req-id" {:req-id req-id})))
-  (invoke-method client "cancelAccountSummary" (int req-id))
+  (invoke-method @client "cancelAccountSummary" (int req-id))
   (unregister-request! conn req-id)
   true)
 
@@ -417,11 +515,11 @@
   - `:subscribe?` defaults to true"
   [{:keys [client]} {:keys [account subscribe?]
                      :or {subscribe? true}}]
-  (when-not client
+  (when-not (some-> client deref)
     (throw (ex-info "Connection map does not contain a client instance" {})))
   (when-not (string? account)
     (throw (ex-info "req-account-updates! requires string :account" {:account account})))
-  (invoke-method client "reqAccountUpdates" (boolean subscribe?) account)
+  (invoke-method @client "reqAccountUpdates" (boolean subscribe?) account)
   true)
 
 (defn cancel-account-updates!
