@@ -14,3 +14,14 @@ pom.xml.asc
 .cpcache/
 .clj-kondo/
 .lsp/
+
+# macOS metadata
+.DS_Store
+**/.DS_Store
+
+# Claude Code working directory (worktrees, session plans, etc.)
+.claude/
+
+# Project-local Clojure / Maven caches
+.clojure/
+.m2/
