@@ -20,7 +20,7 @@ All events include envelope keys:
   - Optional keys: `:id`, `:code`, `:message`, `:raw`, `:request`, `:retryable?`
 
 - `:ib/next-valid-id`
-  - Keys: `:order-id`
+  - Keys: `:order-id` (seeds the internal counter used by `next-order-id!` and `place-order!`)
 
 - `:ib/position`
   - Keys: `:account`, `:contract`, `:position`, `:avg-cost`

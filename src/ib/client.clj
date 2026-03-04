@@ -147,7 +147,75 @@
       request (assoc :request-id req-id
                      :request request))))
 
-(defn- create-wrapper-proxy [publish! request-registry]
+(defn- find-field
+  "Walk the class hierarchy of `clazz` to find a field named `field-name`.
+  Returns the Field or nil."
+  [^Class clazz field-name]
+  (loop [c clazz]
+    (when c
+      (or (try (.getDeclaredField c field-name)
+               (catch NoSuchFieldException _ nil))
+          (recur (.getSuperclass c))))))
+
+(defn- set-field!
+  "Set an arbitrary Java field via reflection; silently skips nil values and
+  unknown fields."
+  [obj field-name value]
+  (when (some? value)
+    (try
+      (when-let [field (find-field (class obj) field-name)]
+        (.setAccessible ^java.lang.reflect.Field field true)
+        (.set ^java.lang.reflect.Field field obj value))
+      (catch Throwable _ nil))))
+
+(defn- set-quantity!
+  "Set `Order.totalQuantity` handling the `com.ib.client.Decimal` type
+  introduced in IB API 10.xx, with a plain double fallback."
+  [order-obj qty]
+  (when (some? qty)
+    (let [decimal-class (resolve-class "com.ib.client.Decimal")]
+      (if decimal-class
+        (try
+          (set-field! order-obj "totalQuantity"
+                      (clojure.lang.Reflector/invokeStaticMethod
+                       decimal-class "get" (to-array [(double qty)])))
+          (catch Throwable _
+            (set-field! order-obj "totalQuantity" (double qty))))
+        (set-field! order-obj "totalQuantity" (double qty))))))
+
+(defn- map->contract
+  "Instantiate a `com.ib.client.Contract` from a kebab-case map.
+  Recognised keys: `:symbol`, `:sec-type`, `:currency`, `:exchange`,
+  `:primary-exch`, `:con-id`."
+  [{:keys [symbol sec-type currency exchange primary-exch con-id]
+    :or {sec-type "STK" currency "USD" exchange "SMART"}}]
+  (let [c (new-instance (resolve-class "com.ib.client.Contract") [])]
+    (set-field! c "symbol"      (str symbol))
+    (set-field! c "secType"     (str sec-type))
+    (set-field! c "currency"    (str currency))
+    (set-field! c "exchange"    (str exchange))
+    (set-field! c "primaryExch" (str (or primary-exch "")))
+    (when con-id (set-field! c "conId" (int (long con-id))))
+    c))
+
+(defn- map->order
+  "Instantiate a `com.ib.client.Order` from a kebab-case map.
+  Recognised keys: `:action`, `:order-type`, `:total-quantity`, `:lmt-price`,
+  `:aux-price`, `:tif`, `:transmit`, `:parent-id`."
+  [{:keys [action order-type total-quantity lmt-price aux-price tif transmit parent-id]
+    :or {tif "DAY" transmit true}}]
+  (let [o (new-instance (resolve-class "com.ib.client.Order") [])]
+    (set-field! o "action"    (some-> action str str/upper-case))
+    (set-field! o "orderType" (some-> order-type str str/upper-case))
+    (set-quantity! o total-quantity)
+    (when lmt-price  (set-field! o "lmtPrice"  (double lmt-price)))
+    (when aux-price  (set-field! o "auxPrice"   (double aux-price)))
+    (set-field! o "tif"      (str tif))
+    (set-field! o "transmit" (boolean transmit))
+    (when parent-id  (set-field! o "parentId"   (int (long parent-id))))
+    o))
+
+(defn- create-wrapper-proxy [publish! request-registry next-order-id-atom]
   (let [wrapper-class (resolve-class "com.ib.client.EWrapper")
         loader (.getClassLoader wrapper-class)
         interfaces (into-array Class [wrapper-class])
@@ -250,8 +318,11 @@
                                    {:reason :connection-closed}))
 
                         "nextValidId"
-                        (publish! (events/next-valid-id->event
-                                   {:order-id (first argv)}))
+                        (do
+                          (when next-order-id-atom
+                            (reset! next-order-id-atom (long (first argv))))
+                          (publish! (events/next-valid-id->event
+                                     {:order-id (first argv)})))
 
                         nil)
                       (default-for-return-type (.getReturnType method)))))]
@@ -285,11 +356,11 @@
 (declare start-reconnect-loop!)
 
 (defn- attempt-reconnect! [conn on-disconnect]
-  (let [{:keys [host port client-id publish! request-registry]} conn
+  (let [{:keys [host port client-id publish! request-registry next-order-id]} conn
         signal-class (resolve-class "com.ib.client.EJavaSignal")
         client-class (resolve-class "com.ib.client.EClientSocket")
         reader-class (resolve-class "com.ib.client.EReader")
-        wrapper (create-wrapper-proxy publish! request-registry)
+        wrapper (create-wrapper-proxy publish! request-registry next-order-id)
         signal (new-instance signal-class [])
         client (new-instance client-class [wrapper signal])]
     (try
@@ -368,7 +439,8 @@
                                                               {:buffer-size event-buffer-size
                                                                :overflow-strategy overflow-strategy})
         request-registry (atom {})
-        wrapper (create-wrapper-proxy publish! request-registry)
+        next-order-id (atom nil)
+        wrapper (create-wrapper-proxy publish! request-registry next-order-id)
         signal-class (resolve-class "com.ib.client.EJavaSignal")
         client-class (resolve-class "com.ib.client.EClientSocket")
         reader-class (resolve-class "com.ib.client.EReader")
@@ -408,6 +480,7 @@
                 :publish! publish!
                 :dropped-events dropped-events
                 :request-registry request-registry
+                :next-order-id next-order-id
                 :open-orders-snapshot-in-flight (atom false)
                 :overflow-strategy overflow-strategy}]
       (letfn [(on-disconnect []
@@ -527,6 +600,66 @@
   [conn account]
   (req-account-updates! conn {:account account
                               :subscribe? false}))
+
+(defn req-ids!
+  "Trigger `reqIds(1)` on the IB client to seed the next valid order ID.
+  IB will respond via the `:ib/next-valid-id` event which automatically
+  updates the internal counter used by `next-order-id!`."
+  [{:keys [client]}]
+  (when-not (some-> client deref)
+    (throw (ex-info "Connection map does not contain a client instance" {})))
+  (invoke-method @client "reqIds" (int 1))
+  true)
+
+(defn next-order-id!
+  "Atomically return the current next-valid order ID and increment the counter.
+  Throws if the counter has not been seeded (call `req-ids!` first)."
+  [{:keys [next-order-id]}]
+  (when-not next-order-id
+    (throw (ex-info "Connection map missing :next-order-id. Was connect! used?" {})))
+  (when (nil? @next-order-id)
+    (throw (ex-info "No valid order ID received yet. Call req-ids! and wait for :ib/next-valid-id." {})))
+  (let [id @next-order-id]
+    (swap! next-order-id inc)
+    id))
+
+(defn place-order!
+  "Submit an order via `placeOrder(orderId, contract, order)`.
+
+  Options map:
+  - `:order-id` integer order ID (optional — auto-allocated via `next-order-id!` when absent)
+  - `:contract` `com.ib.client.Contract` instance *or* a map with keys
+    `:symbol`, `:sec-type`, `:currency`, `:exchange`, `:primary-exch`, `:con-id`
+  - `:order`    `com.ib.client.Order` instance *or* a map with keys
+    `:action`, `:order-type`, `:total-quantity`, `:lmt-price`, `:aux-price`,
+    `:tif`, `:transmit`, `:parent-id`
+
+  Returns the order-id used."
+  [{:keys [client] :as conn} {:keys [order-id contract order]}]
+  (when-not (some-> client deref)
+    (throw (ex-info "Connection map does not contain a client instance" {})))
+  (let [oid (or order-id (next-order-id! conn))]
+    (when-not (integer? oid)
+      (throw (ex-info "place-order! requires an integer :order-id" {:order-id oid})))
+    (let [java-contract (if (map? contract) (map->contract contract) contract)
+          java-order    (if (map? order)    (map->order order)    order)]
+      (invoke-method @client "placeOrder" (int oid) java-contract java-order)
+      oid)))
+
+(defn cancel-order!
+  "Cancel an open order via `cancelOrder(orderId)`.
+  Tries the 2-arg variant (API 10.xx) first, falls back to 1-arg.
+  Returns `true`."
+  [{:keys [client]} order-id]
+  (when-not (some-> client deref)
+    (throw (ex-info "Connection map does not contain a client instance" {})))
+  (when-not (integer? order-id)
+    (throw (ex-info "cancel-order! requires an integer order-id" {:order-id order-id})))
+  (try
+    (invoke-method @client "cancelOrder" (int order-id) "")
+    (catch Throwable _
+      (invoke-method @client "cancelOrder" (int order-id))))
+  true)
 
 (defn events-chan
   "Return the shared event channel (primarily for diagnostics)."

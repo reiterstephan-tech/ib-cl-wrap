@@ -43,6 +43,8 @@
 (s/def :ib/orders (s/coll-of :ib.result/open-order :kind vector?))
 (s/def :ib/account string?)
 (s/def :ib/subscribe? boolean?)
+(s/def :ib/action string?)
+(s/def :ib/order-type string?)
 
 (s/def :ib.contract/conId (s/nilable int?))
 (s/def :ib.contract/symbol (s/nilable string?))
@@ -259,6 +261,7 @@
 (s/def :ib.conn/with-request-registry (s/and map? #(contains? % :request-registry)))
 (s/def :ib.conn/with-open-orders-guard (s/and map? #(contains? % :open-orders-snapshot-in-flight)))
 (s/def :ib.conn/with-reconnect-guard (s/and map? #(contains? % :reconnecting?)))
+(s/def :ib.conn/with-order-id-counter (s/and map? #(contains? % :next-order-id)))
 (s/def :ib.conn/any map?)
 
 (s/fdef ib.client/connect!
@@ -320,6 +323,22 @@
   :args (s/cat :conn :ib.conn/with-client :account :ib/account)
   :ret true?)
 
+(s/fdef ib.client/req-ids!
+  :args (s/cat :conn :ib.conn/with-client)
+  :ret true?)
+
+(s/fdef ib.client/next-order-id!
+  :args (s/cat :conn :ib.conn/with-order-id-counter)
+  :ret int?)
+
+(s/fdef ib.client/place-order!
+  :args (s/cat :conn :ib.conn/with-client :opts map?)
+  :ret int?)
+
+(s/fdef ib.client/cancel-order!
+  :args (s/cat :conn :ib.conn/with-client :order-id int?)
+  :ret true?)
+
 (s/fdef ib.client/register-request!
   :args (s/cat :conn :ib.conn/with-request-registry :req-id :ib/request-id :request map?)
   :ret :ib/request-id)
@@ -361,4 +380,8 @@
    #'ib.client/unregister-request!
    #'ib.client/request-context
    #'ib.client/dropped-event-count
-   #'ib.open-orders/open-orders-snapshot!])
+   #'ib.open-orders/open-orders-snapshot!
+   #'ib.client/req-ids!
+   #'ib.client/next-order-id!
+   #'ib.client/place-order!
+   #'ib.client/cancel-order!])

@@ -16,6 +16,11 @@
 (definterface IStartApiClient
   (startAPI []))
 
+(definterface IOrderClient
+  (reqIds [numIds])
+  (placeOrder [orderId contract order])
+  (cancelOrder [orderId manualCancelTime]))
+
 (definterface ILoopClient
   (isConnected []))
 
@@ -369,3 +374,97 @@
           (is (identical? mock-client @client-atom))
           (is (identical? mock-reader @reader-atom))
           (is (identical? mock-thread @reader-thread-atom)))))))
+
+(deftest req-ids-test
+  (testing "req-ids! calls reqIds with 1 and returns true"
+    (let [seen (atom nil)
+          c (reify IOrderClient
+              (reqIds [_ num-ids] (reset! seen num-ids))
+              (placeOrder [_ _ _ _] nil)
+              (cancelOrder [_ _ _] nil))]
+      (is (true? (client/req-ids! {:client (atom c)})))
+      (is (= 1 @seen))))
+
+  (testing "req-ids! throws when client is missing"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (client/req-ids! {})))))
+
+(deftest next-order-id-counter-test
+  (testing "counter returns current value and increments"
+    (let [counter (atom 100)
+          conn {:next-order-id counter}]
+      (is (= 100 (client/next-order-id! conn)))
+      (is (= 101 @counter))
+      (is (= 101 (client/next-order-id! conn)))
+      (is (= 102 @counter))))
+
+  (testing "throws when counter is unseeded (nil value)"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (client/next-order-id! {:next-order-id (atom nil)}))))
+
+  (testing "throws when :next-order-id key is absent"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (client/next-order-id! {})))))
+
+(deftest place-order-test
+  (let [mock-contract (Object.)
+        mock-order    (Object.)]
+    (with-redefs [ib.client/map->contract (constantly mock-contract)
+                  ib.client/map->order    (constantly mock-order)]
+
+      (testing "place-order! with explicit :order-id invokes placeOrder and returns order-id"
+        (let [seen (atom nil)
+              c (reify IOrderClient
+                  (reqIds [_ _] nil)
+                  (placeOrder [_ oid contract order]
+                    (reset! seen [oid contract order]))
+                  (cancelOrder [_ _ _] nil))]
+          (is (= 42 (client/place-order! {:client (atom c)
+                                          :next-order-id (atom 99)}
+                                         {:order-id 42
+                                          :contract {:symbol "AAPL"}
+                                          :order {:action "BUY" :total-quantity 100}})))
+          (is (= [42 mock-contract mock-order] @seen))))
+
+      (testing "place-order! auto-allocates order-id from counter when :order-id absent"
+        (let [seen (atom nil)
+              counter (atom 7)
+              c (reify IOrderClient
+                  (reqIds [_ _] nil)
+                  (placeOrder [_ oid contract order]
+                    (reset! seen [oid contract order]))
+                  (cancelOrder [_ _ _] nil))]
+          (is (= 7 (client/place-order! {:client (atom c)
+                                         :next-order-id counter}
+                                        {:contract {:symbol "AAPL"}
+                                         :order {:action "BUY" :total-quantity 100}})))
+          (is (= 7 (first @seen)))
+          (is (= 8 @counter))))
+
+      (testing "place-order! throws when client is missing"
+        (is (thrown? clojure.lang.ExceptionInfo
+                     (client/place-order! {} {:order-id 1
+                                              :contract mock-contract
+                                              :order mock-order})))))))
+
+(deftest cancel-order-test
+  (testing "cancel-order! calls cancelOrder with correct order-id and returns true"
+    (let [seen (atom nil)
+          c (reify IOrderClient
+              (reqIds [_ _] nil)
+              (placeOrder [_ _ _ _] nil)
+              (cancelOrder [_ oid _] (reset! seen oid)))]
+      (is (true? (client/cancel-order! {:client (atom c)} 55)))
+      (is (= 55 @seen))))
+
+  (testing "cancel-order! throws for non-integer order-id"
+    (let [c (reify IOrderClient
+              (reqIds [_ _] nil)
+              (placeOrder [_ _ _ _] nil)
+              (cancelOrder [_ _ _] nil))]
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (client/cancel-order! {:client (atom c)} "not-an-int")))))
+
+  (testing "cancel-order! throws when client is missing"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (client/cancel-order! {} 1)))))
