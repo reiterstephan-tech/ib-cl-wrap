@@ -379,3 +379,28 @@
       :code code
       :message (some-> message str/trim)
       :raw raw})))
+
+(defn reconnecting->event
+  "Build normalized `:ib/reconnecting` event emitted at the start of each reconnect attempt."
+  [{:keys [attempt delay-ms]}]
+  (merge
+   (base-event :ib/reconnecting {:status :ok})
+   {:attempt attempt
+    :delay-ms delay-ms}))
+
+(defn reconnected->event
+  "Build normalized `:ib/reconnected` event emitted when reconnect succeeds."
+  [{:keys [host port client-id attempt]}]
+  (merge
+   (base-event :ib/reconnected {:status :ok})
+   {:host host
+    :port port
+    :client-id client-id
+    :attempt attempt}))
+
+(defn reconnect-failed->event
+  "Build normalized `:ib/reconnect-failed` event emitted when all reconnect attempts are exhausted."
+  [{:keys [attempts]}]
+  (merge
+   (base-event :ib/reconnect-failed {:status :error})
+   {:attempts attempts}))

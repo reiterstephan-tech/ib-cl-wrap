@@ -54,3 +54,12 @@ All events include envelope keys:
 
 - `:ib/account-download-end`
   - Keys: `:account`
+
+- `:ib/reconnecting`
+  - Keys: `:attempt`, `:delay-ms`
+
+- `:ib/reconnected`
+  - Keys: `:host`, `:port`, `:client-id`, `:attempt`
+
+- `:ib/reconnect-failed`
+  - Keys: `:attempts`
