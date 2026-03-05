@@ -324,6 +324,17 @@
                           (publish! (events/next-valid-id->event
                                      {:order-id (first argv)})))
 
+                        "tickPrice"
+                        (let [[ticker-id field price _attrib] argv]
+                          (publish! (events/tick-price->event
+                                     {:req-id ticker-id
+                                      :field  (int field)
+                                      :price  price})))
+
+                        "tickSnapshotEnd"
+                        (publish! (events/tick-snapshot-end->event
+                                   {:req-id (first argv)}))
+
                         nil)
                       (default-for-return-type (.getReturnType method)))))]
     (java.lang.reflect.Proxy/newProxyInstance loader interfaces handler)))
@@ -659,6 +670,69 @@
     (invoke-method @client "cancelOrder" (int order-id) "")
     (catch Throwable _
       (invoke-method @client "cancelOrder" (int order-id))))
+  true)
+
+(defn connected?
+  "Return `true` if the IB client socket is currently connected."
+  [{:keys [client]}]
+  (boolean (and (some-> client deref)
+                (try (invoke-method @client "isConnected")
+                     (catch Throwable _ false)))))
+
+(defn req-market-data-type!
+  "Set the market data type for subsequent `req-mkt-data!` calls.
+
+  Types: `1` = live, `2` = frozen, `3` = delayed, `4` = delayed-frozen.
+  Use `4` for testing without a paid data subscription."
+  [{:keys [client]} market-data-type]
+  (when-not (some-> client deref)
+    (throw (ex-info "Connection map does not contain a client instance" {})))
+  (invoke-method @client "reqMktDataType" (int market-data-type))
+  true)
+
+(defn req-mkt-data!
+  "Request market data ticks for a contract via `reqMktData`.
+
+  Options:
+  - `:req-id`                 integer request id (required)
+  - `:symbol`                 ticker symbol string
+  - `:sec-type`               default `\"STK\"`
+  - `:exchange`               default `\"SMART\"`
+  - `:currency`               default `\"USD\"`
+  - `:generic-tick-list`      default `\"\"`
+  - `:snapshot`               boolean, default `true`
+  - `:regulatory-snapshot`    boolean, default `false`
+
+  Returns `true`. Listen on the event stream for `:ib/tick-price` and
+  `:ib/tick-snapshot-end` events tagged with the same `:req-id`."
+  [{:keys [client]}
+   {:keys [req-id symbol sec-type exchange currency generic-tick-list snapshot regulatory-snapshot]
+    :or {sec-type "STK" exchange "SMART" currency "USD"
+         generic-tick-list "" snapshot true regulatory-snapshot false}}]
+  (when-not (some-> client deref)
+    (throw (ex-info "Connection map does not contain a client instance" {})))
+  (when-not (integer? req-id)
+    (throw (ex-info "req-mkt-data! requires integer :req-id" {:req-id req-id})))
+  (let [contract (map->contract {:symbol symbol :sec-type sec-type
+                                 :exchange exchange :currency currency})]
+    (try
+      (invoke-method @client "reqMktData" (int req-id) contract
+                     (str generic-tick-list) (boolean snapshot)
+                     (boolean regulatory-snapshot) nil)
+      (catch Throwable _
+        (invoke-method @client "reqMktData" (int req-id) contract
+                       (str generic-tick-list) (boolean snapshot)
+                       (boolean regulatory-snapshot)))))
+  true)
+
+(defn cancel-mkt-data!
+  "Cancel a market data subscription via `cancelMktData(reqId)`."
+  [{:keys [client]} req-id]
+  (when-not (some-> client deref)
+    (throw (ex-info "Connection map does not contain a client instance" {})))
+  (when-not (integer? req-id)
+    (throw (ex-info "cancel-mkt-data! requires integer req-id" {:req-id req-id})))
+  (invoke-method @client "cancelMktData" (int req-id))
   true)
 
 (defn events-chan

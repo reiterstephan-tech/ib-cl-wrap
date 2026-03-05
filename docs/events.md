@@ -63,3 +63,9 @@ All events include envelope keys:
 
 - `:ib/reconnect-failed`
   - Keys: `:attempts`
+
+- `:ib/tick-price`
+  - Keys: `:req-id`, `:field` (raw IB tick type integer), `:field-key` (`:bid`/`:ask`/`:last`/`:high`/`:low`/`:close`/`:open` or `nil`), `:price`
+
+- `:ib/tick-snapshot-end`
+  - Keys: `:req-id`

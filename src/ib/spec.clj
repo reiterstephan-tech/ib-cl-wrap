@@ -45,6 +45,11 @@
 (s/def :ib/subscribe? boolean?)
 (s/def :ib/action string?)
 (s/def :ib/order-type string?)
+(s/def :ib/market-data-type (s/and int? #(<= 1 % 4)))
+(s/def :ib/req-id (s/and int? (complement neg?)))
+(s/def :ib/field int?)
+(s/def :ib/field-key (s/nilable keyword?))
+(s/def :ib/price (s/nilable number?))
 
 (s/def :ib.contract/conId (s/nilable int?))
 (s/def :ib.contract/symbol (s/nilable string?))
@@ -202,6 +207,15 @@
   (s/and :ib.event/base
          (s/keys :req-un [:ib.event/attempts])))
 
+(defmethod event-dispatch :ib/tick-price [_]
+  (s/and :ib.event/base
+         (s/keys :req-un [:ib/req-id :ib/field]
+                 :opt-un [:ib/field-key :ib/price])))
+
+(defmethod event-dispatch :ib/tick-snapshot-end [_]
+  (s/and :ib.event/base
+         (s/keys :req-un [:ib/req-id])))
+
 (defmethod event-dispatch :default [_]
   :ib.event/base)
 
@@ -323,6 +337,22 @@
   :args (s/cat :conn :ib.conn/with-client :account :ib/account)
   :ret true?)
 
+(s/fdef ib.client/connected?
+  :args (s/cat :conn map?)
+  :ret boolean?)
+
+(s/fdef ib.client/req-market-data-type!
+  :args (s/cat :conn :ib.conn/with-client :market-data-type :ib/market-data-type)
+  :ret true?)
+
+(s/fdef ib.client/req-mkt-data!
+  :args (s/cat :conn :ib.conn/with-client :opts map?)
+  :ret true?)
+
+(s/fdef ib.client/cancel-mkt-data!
+  :args (s/cat :conn :ib.conn/with-client :req-id :ib/req-id)
+  :ret true?)
+
 (s/fdef ib.client/req-ids!
   :args (s/cat :conn :ib.conn/with-client)
   :ret true?)
@@ -381,6 +411,10 @@
    #'ib.client/request-context
    #'ib.client/dropped-event-count
    #'ib.open-orders/open-orders-snapshot!
+   #'ib.client/connected?
+   #'ib.client/req-market-data-type!
+   #'ib.client/req-mkt-data!
+   #'ib.client/cancel-mkt-data!
    #'ib.client/req-ids!
    #'ib.client/next-order-id!
    #'ib.client/place-order!

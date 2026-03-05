@@ -21,6 +21,12 @@
   (placeOrder [orderId contract order])
   (cancelOrder [orderId manualCancelTime]))
 
+(definterface IMktDataClient
+  (isConnected [])
+  (reqMktDataType [marketDataType])
+  (reqMktData [tickerId contract genericTickList snapshot regulatorySnapshot mktDataOptions])
+  (cancelMktData [tickerId]))
+
 (definterface ILoopClient
   (isConnected []))
 
@@ -468,3 +474,103 @@
   (testing "cancel-order! throws when client is missing"
     (is (thrown? clojure.lang.ExceptionInfo
                  (client/cancel-order! {} 1)))))
+
+(deftest tick-price-event-test
+  (testing "tick-price->event maps known field integers to keywords"
+    (let [ev (events/tick-price->event {:req-id 5 :field 1 :price 179.5})]
+      (is (= :ib/tick-price (:type ev)))
+      (is (= 5 (:req-id ev)))
+      (is (= 1 (:field ev)))
+      (is (= :bid (:field-key ev)))
+      (is (= 179.5 (:price ev)))))
+
+  (testing "tick-price->event sets field-key nil for unknown field"
+    (let [ev (events/tick-price->event {:req-id 5 :field 99 :price 1.0})]
+      (is (nil? (:field-key ev)))))
+
+  (testing "tick-snapshot-end->event sets req-id"
+    (let [ev (events/tick-snapshot-end->event {:req-id 42})]
+      (is (= :ib/tick-snapshot-end (:type ev)))
+      (is (= 42 (:req-id ev))))))
+
+(deftest connected?-test
+  (testing "connected? returns true when isConnected returns true"
+    (let [c (reify IMktDataClient
+              (isConnected [_] true)
+              (reqMktDataType [_ _] nil)
+              (reqMktData [_ _ _ _ _ _ _] nil)
+              (cancelMktData [_ _] nil))]
+      (is (true? (client/connected? {:client (atom c)})))))
+
+  (testing "connected? returns false when client atom is nil"
+    (is (false? (client/connected? {:client (atom nil)}))))
+
+  (testing "connected? returns false when :client key is absent"
+    (is (false? (client/connected? {})))))
+
+(deftest req-market-data-type-test
+  (testing "req-market-data-type! calls reqMktDataType with correct arg"
+    (let [seen (atom nil)
+          c (reify IMktDataClient
+              (isConnected [_] true)
+              (reqMktDataType [_ t] (reset! seen t))
+              (reqMktData [_ _ _ _ _ _ _] nil)
+              (cancelMktData [_ _] nil))]
+      (is (true? (client/req-market-data-type! {:client (atom c)} 4)))
+      (is (= 4 @seen))))
+
+  (testing "req-market-data-type! throws when client is missing"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (client/req-market-data-type! {} 4)))))
+
+(deftest req-mkt-data-test
+  (with-redefs [ib.client/map->contract (constantly (Object.))]
+    (testing "req-mkt-data! calls reqMktData and returns true"
+      (let [seen (atom nil)
+            c (reify IMktDataClient
+                (isConnected [_] true)
+                (reqMktDataType [_ _] nil)
+                (reqMktData [_ ticker-id _ _ snapshot _ _]
+                  (reset! seen {:ticker-id ticker-id :snapshot snapshot}))
+                (cancelMktData [_ _] nil))]
+        (is (true? (client/req-mkt-data! {:client (atom c)}
+                                         {:req-id 99 :symbol "AAPL" :snapshot true})))
+        (is (= 99 (:ticker-id @seen)))
+        (is (true? (:snapshot @seen)))))
+
+    (testing "req-mkt-data! throws for missing req-id"
+      (let [c (reify IMktDataClient
+                (isConnected [_] true)
+                (reqMktDataType [_ _] nil)
+                (reqMktData [_ _ _ _ _ _ _] nil)
+                (cancelMktData [_ _] nil))]
+        (is (thrown? clojure.lang.ExceptionInfo
+                     (client/req-mkt-data! {:client (atom c)} {:symbol "AAPL"})))))
+
+    (testing "req-mkt-data! throws when client is missing"
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (client/req-mkt-data! {} {:req-id 1 :symbol "AAPL"}))))))
+
+(deftest cancel-mkt-data-test
+  (testing "cancel-mkt-data! calls cancelMktData with correct req-id"
+    (let [seen (atom nil)
+          c (reify IMktDataClient
+              (isConnected [_] true)
+              (reqMktDataType [_ _] nil)
+              (reqMktData [_ _ _ _ _ _ _] nil)
+              (cancelMktData [_ id] (reset! seen id)))]
+      (is (true? (client/cancel-mkt-data! {:client (atom c)} 77)))
+      (is (= 77 @seen))))
+
+  (testing "cancel-mkt-data! throws for non-integer req-id"
+    (let [c (reify IMktDataClient
+              (isConnected [_] true)
+              (reqMktDataType [_ _] nil)
+              (reqMktData [_ _ _ _ _ _ _] nil)
+              (cancelMktData [_ _] nil))]
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (client/cancel-mkt-data! {:client (atom c)} "bad")))))
+
+  (testing "cancel-mkt-data! throws when client is missing"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (client/cancel-mkt-data! {} 1)))))

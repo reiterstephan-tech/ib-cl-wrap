@@ -404,3 +404,34 @@
   (merge
    (base-event :ib/reconnect-failed {:status :error})
    {:attempts attempts}))
+
+(def tick-type->key
+  "IB tick type integer → semantic keyword used in `:ib/tick-price` events."
+  {1  :bid
+   2  :ask
+   4  :last
+   6  :high
+   7  :low
+   9  :close
+   14 :open})
+
+(defn tick-price->event
+  "Build normalized `:ib/tick-price` event from IB `tickPrice` callback.
+  `:field-key` is the semantic keyword (`:bid`, `:ask`, `:last`, etc.) or
+  `nil` for unrecognised tick types."
+  [{:keys [req-id field price]}]
+  (let [rid (parse-long-safe req-id)]
+    (merge
+     (base-event :ib/tick-price {:status :ok :request-id rid})
+     {:req-id    rid
+      :field     field
+      :field-key (get tick-type->key field)
+      :price     (parse-double-safe price)})))
+
+(defn tick-snapshot-end->event
+  "Build normalized `:ib/tick-snapshot-end` event from IB `tickSnapshotEnd` callback."
+  [{:keys [req-id]}]
+  (let [rid (parse-long-safe req-id)]
+    (merge
+     (base-event :ib/tick-snapshot-end {:status :ok :request-id rid})
+     {:req-id rid})))
