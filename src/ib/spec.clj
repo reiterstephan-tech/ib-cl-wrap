@@ -4,6 +4,7 @@
             [clojure.spec.alpha :as s]
             [ib.account]
             [ib.client]
+            [ib.contract]
             [ib.events]
             [ib.open-orders]
             [ib.positions]))
@@ -216,6 +217,14 @@
   (s/and :ib.event/base
          (s/keys :req-un [:ib/req-id])))
 
+(defmethod event-dispatch :ib/contract-details [_]
+  (s/and :ib.event/base
+         (s/keys :req-un [:ib/req-id])))
+
+(defmethod event-dispatch :ib/contract-details-end [_]
+  (s/and :ib.event/base
+         (s/keys :req-un [:ib/req-id])))
+
 (defmethod event-dispatch :default [_]
   :ib.event/base)
 
@@ -353,6 +362,19 @@
   :args (s/cat :conn :ib.conn/with-client :req-id :ib/req-id)
   :ret true?)
 
+(s/fdef ib.client/req-contract-details!
+  :args (s/cat :conn :ib.conn/with-client :opts map?)
+  :ret true?)
+
+(s/def :ib.config/contract-opts
+  (s/keys :opt-un [:ib/req-id :ib/timeout-ms :ib/tap-buffer-size]))
+
+(s/fdef ib.contract/contract-details-snapshot!
+  :args (s/or :arity-2 (s/cat :conn :ib.conn/with-client :contract-opts map?)
+              :arity-3 (s/cat :conn :ib.conn/with-client :contract-opts map?
+                              :opts :ib.config/contract-opts))
+  :ret :ib/channel)
+
 (s/fdef ib.client/req-ids!
   :args (s/cat :conn :ib.conn/with-client)
   :ret true?)
@@ -418,4 +440,6 @@
    #'ib.client/req-ids!
    #'ib.client/next-order-id!
    #'ib.client/place-order!
-   #'ib.client/cancel-order!])
+   #'ib.client/cancel-order!
+   #'ib.client/req-contract-details!
+   #'ib.contract/contract-details-snapshot!])

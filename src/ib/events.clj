@@ -435,3 +435,40 @@
     (merge
      (base-event :ib/tick-snapshot-end {:status :ok :request-id rid})
      {:req-id rid})))
+
+(defn- contract-details-field [cd method-names]
+  (some #(try-zero-arg-method cd %) method-names))
+
+(defn contract-details->map
+  "Normalize IB ContractDetails Java object into a stable map.
+
+  Inner contract is normalized via `contract->map`.
+  Fields extracted: `:long-name`, `:min-tick`, `:trading-hours`,
+  `:liquid-hours`, `:time-zone-id`."
+  [cd]
+  (when cd
+    (let [inner (or (try-zero-arg-method cd "contract")
+                    (try-zero-arg-method cd "m_contract"))]
+      {:contract      (when inner (contract->map inner))
+       :long-name     (some-> (contract-details-field cd ["longName" "getLongName"]) str)
+       :min-tick      (parse-double-safe (contract-details-field cd ["minTick" "getMinTick"]))
+       :trading-hours (some-> (contract-details-field cd ["tradingHours" "getTradingHours"]) str)
+       :liquid-hours  (some-> (contract-details-field cd ["liquidHours" "getLiquidHours"]) str)
+       :time-zone-id  (some-> (contract-details-field cd ["timeZoneId" "getTimeZoneId"]) str)})))
+
+(defn contract-details->event
+  "Build normalized `:ib/contract-details` event from IB `contractDetails` callback."
+  [{:keys [req-id contract-details]}]
+  (let [rid (parse-long-safe req-id)]
+    (merge
+     (base-event :ib/contract-details {:status :ok :request-id rid})
+     {:req-id           rid
+      :contract-details (contract-details->map contract-details)})))
+
+(defn contract-details-end->event
+  "Build normalized `:ib/contract-details-end` event from IB `contractDetailsEnd` callback."
+  [{:keys [req-id]}]
+  (let [rid (parse-long-safe req-id)]
+    (merge
+     (base-event :ib/contract-details-end {:status :ok :request-id rid})
+     {:req-id rid})))
