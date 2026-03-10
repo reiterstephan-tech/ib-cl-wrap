@@ -27,6 +27,9 @@
   (reqMktData [tickerId contract genericTickList snapshot regulatorySnapshot mktDataOptions])
   (cancelMktData [tickerId]))
 
+(definterface IContractDetailsClient
+  (reqContractDetails [reqId contract]))
+
 (definterface ILoopClient
   (isConnected []))
 
@@ -574,3 +577,23 @@
   (testing "cancel-mkt-data! throws when client is missing"
     (is (thrown? clojure.lang.ExceptionInfo
                  (client/cancel-mkt-data! {} 1)))))
+
+(deftest req-contract-details-test
+  (testing "req-contract-details! calls reqContractDetails with correct req-id"
+    (let [seen (atom nil)
+          c (reify IContractDetailsClient
+              (reqContractDetails [_ req-id _contract]
+                (reset! seen req-id)))]
+      (is (true? (client/req-contract-details! {:client (atom c)}
+                                               {:req-id 55 :symbol "AAPL"})))
+      (is (= 55 @seen))))
+
+  (testing "req-contract-details! throws for missing req-id"
+    (let [c (reify IContractDetailsClient
+              (reqContractDetails [_ _ _] nil))]
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (client/req-contract-details! {:client (atom c)} {:symbol "AAPL"})))))
+
+  (testing "req-contract-details! throws when client is missing"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (client/req-contract-details! {} {:req-id 1 :symbol "AAPL"})))))

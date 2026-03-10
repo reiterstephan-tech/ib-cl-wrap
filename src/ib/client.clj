@@ -335,6 +335,16 @@
                         (publish! (events/tick-snapshot-end->event
                                    {:req-id (first argv)}))
 
+                        "contractDetails"
+                        (let [[req-id contract-details] argv]
+                          (publish! (events/contract-details->event
+                                     {:req-id           req-id
+                                      :contract-details contract-details})))
+
+                        "contractDetailsEnd"
+                        (publish! (events/contract-details-end->event
+                                   {:req-id (first argv)}))
+
                         nil)
                       (default-for-return-type (.getReturnType method)))))]
     (java.lang.reflect.Proxy/newProxyInstance loader interfaces handler)))
@@ -696,8 +706,10 @@
   Options:
   - `:req-id`                 integer request id (required)
   - `:symbol`                 ticker symbol string
+  - `:con-id`                 IB contract id (preferred; use instead of symbol)
   - `:sec-type`               default `\"STK\"`
   - `:exchange`               default `\"SMART\"`
+  - `:primary-exch`           primary exchange (e.g. `\"NYSE\"`) for SMART routing
   - `:currency`               default `\"USD\"`
   - `:generic-tick-list`      default `\"\"`
   - `:snapshot`               boolean, default `true`
@@ -706,15 +718,17 @@
   Returns `true`. Listen on the event stream for `:ib/tick-price` and
   `:ib/tick-snapshot-end` events tagged with the same `:req-id`."
   [{:keys [client]}
-   {:keys [req-id symbol sec-type exchange currency generic-tick-list snapshot regulatory-snapshot]
+   {:keys [req-id symbol con-id sec-type exchange primary-exch currency
+           generic-tick-list snapshot regulatory-snapshot]
     :or {sec-type "STK" exchange "SMART" currency "USD"
          generic-tick-list "" snapshot true regulatory-snapshot false}}]
   (when-not (some-> client deref)
     (throw (ex-info "Connection map does not contain a client instance" {})))
   (when-not (integer? req-id)
     (throw (ex-info "req-mkt-data! requires integer :req-id" {:req-id req-id})))
-  (let [contract (map->contract {:symbol symbol :sec-type sec-type
-                                 :exchange exchange :currency currency})]
+  (let [contract (map->contract {:symbol symbol :con-id con-id :sec-type sec-type
+                                 :exchange exchange :primary-exch primary-exch
+                                 :currency currency})]
     (try
       (invoke-method @client "reqMktData" (int req-id) contract
                      (str generic-tick-list) (boolean snapshot)
@@ -733,6 +747,32 @@
   (when-not (integer? req-id)
     (throw (ex-info "cancel-mkt-data! requires integer req-id" {:req-id req-id})))
   (invoke-method @client "cancelMktData" (int req-id))
+  true)
+
+(defn req-contract-details!
+  "Request contract details via `reqContractDetails(reqId, contract)`.
+
+  Options:
+  - `:req-id`      integer request id (required)
+  - `:symbol`      ticker symbol string
+  - `:con-id`      IB contract id (preferred when known)
+  - `:sec-type`    default `\"STK\"`
+  - `:exchange`    default `\"SMART\"`
+  - `:currency`    default `\"USD\"`
+
+  Listen on the event stream for `:ib/contract-details` events (one per
+  matching contract) followed by `:ib/contract-details-end`, all tagged
+  with the same `:req-id`."
+  [{:keys [client]}
+   {:keys [req-id symbol con-id sec-type exchange currency]
+    :or {sec-type "STK" exchange "SMART" currency "USD"}}]
+  (when-not (some-> client deref)
+    (throw (ex-info "Connection map does not contain a client instance" {})))
+  (when-not (integer? req-id)
+    (throw (ex-info "req-contract-details! requires integer :req-id" {:req-id req-id})))
+  (let [contract (map->contract {:symbol symbol :con-id con-id :sec-type sec-type
+                                 :exchange exchange :currency currency})]
+    (invoke-method @client "reqContractDetails" (int req-id) contract))
   true)
 
 (defn events-chan

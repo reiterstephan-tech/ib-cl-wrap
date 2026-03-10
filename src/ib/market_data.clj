@@ -19,17 +19,19 @@
   it works without a live data subscription.
 
   Options:
+  - `:con-id`      IB contract id (preferred; use instead of symbol when known)
   - `:sec-type`    default \"STK\"
   - `:exchange`    default \"SMART\"
+  - `:primary-exch` primary exchange for SMART routing (e.g. \"NYSE\")
   - `:currency`    default \"USD\"
   - `:timeout-ms`  default 8000
 
   Returns a channel delivering one map:
-  - success: `{:ok true  :symbol ... :bid ... :ask ... :last ... :high ... :low ... :close ...}`
+  - success: `{:ok true  :symbol ... :ticks {:bid ... :ask ... :last ...}}`
   - error:   `{:ok false :error :timeout/:ib-error/:stream-closed ... }`"
   ([conn symbol]
    (market-data-snapshot! conn symbol {}))
-  ([conn symbol {:keys [sec-type exchange currency timeout-ms]
+  ([conn symbol {:keys [con-id sec-type exchange primary-exch currency timeout-ms]
                  :or {sec-type "STK" exchange "SMART" currency "USD" timeout-ms 8000}}]
    (let [rid        (next-req-id!)
          sub-ch     (client/subscribe-events! conn {:buffer-size 64})
@@ -39,12 +41,14 @@
        (client/req-market-data-type! conn 4)
        (catch Throwable _ nil))
      (let [req-err (try
-                     (client/req-mkt-data! conn {:req-id   rid
-                                                 :symbol   symbol
-                                                 :sec-type sec-type
-                                                 :exchange exchange
-                                                 :currency currency
-                                                 :snapshot true})
+                     (client/req-mkt-data! conn {:req-id       rid
+                                                 :symbol       symbol
+                                                 :con-id       con-id
+                                                 :sec-type     sec-type
+                                                 :exchange     exchange
+                                                 :primary-exch primary-exch
+                                                 :currency     currency
+                                                 :snapshot     true})
                      nil
                      (catch Throwable t t))]
        (if req-err

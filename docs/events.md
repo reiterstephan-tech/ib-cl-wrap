@@ -69,3 +69,11 @@ All events include envelope keys:
 
 - `:ib/tick-snapshot-end`
   - Keys: `:req-id`
+
+- `:ib/contract-details`
+  - Keys: `:req-id`, `:contract-details` (map with `:contract` (see contract shape below), `:long-name`, `:min-tick`, `:trading-hours`, `:liquid-hours`, `:time-zone-id`)
+  - One event per matching contract; followed by `:ib/contract-details-end`
+  - The inner `:contract` map has keys: `:conId`, `:symbol`, `:secType`, `:currency`, `:exchange`
+
+- `:ib/contract-details-end`
+  - Keys: `:req-id`
