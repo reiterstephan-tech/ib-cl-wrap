@@ -190,12 +190,12 @@
   [{:keys [symbol sec-type currency exchange primary-exch con-id]
     :or {sec-type "STK" currency "USD" exchange "SMART"}}]
   (let [c (new-instance (resolve-class "com.ib.client.Contract") [])]
-    (set-field! c "symbol"      (str symbol))
-    (set-field! c "secType"     (str sec-type))
-    (set-field! c "currency"    (str currency))
-    (set-field! c "exchange"    (str exchange))
-    (set-field! c "primaryExch" (str (or primary-exch "")))
-    (when con-id (set-field! c "conId" (int (long con-id))))
+    (set-field! c "m_symbol"      (str symbol))
+    (set-field! c "m_secType"     (str sec-type))
+    (set-field! c "m_currency"    (str currency))
+    (set-field! c "m_exchange"    (str exchange))
+    (set-field! c "m_primaryExch" (str (or primary-exch "")))
+    (when con-id (set-field! c "m_conid" (int (long con-id))))
     c))
 
 (defn- map->order
