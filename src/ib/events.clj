@@ -435,3 +435,54 @@
     (merge
      (base-event :ib/tick-snapshot-end {:status :ok :request-id rid})
      {:req-id rid})))
+
+(defn- get-field
+  "Read a public Java field by name via reflection, walking the class hierarchy.
+  Returns the field value or nil if not found / inaccessible."
+  [obj field-name]
+  (try
+    (let [f (loop [c (class obj)]
+               (when c
+                 (or (try (.getDeclaredField c field-name)
+                          (catch NoSuchFieldException _ nil))
+                     (recur (.getSuperclass c)))))]
+      (when f
+        (.setAccessible ^java.lang.reflect.Field f true)
+        (.get ^java.lang.reflect.Field f obj)))
+    (catch Throwable _ nil)))
+
+(defn contract-details->event
+  "Build normalized `:ib/contract-details` event from IB `contractDetails` callback.
+
+  Handles both old API (`m_summary` field) and new API (`contract()` method or `contract` field)."
+  [{:keys [req-id contract-details]}]
+  (let [rid (parse-long-safe req-id)
+        cd  contract-details
+        ;; ContractDetails.contract may be a method (newer API) or field (older API)
+        contract-obj (or (try-zero-arg-method cd "contract")
+                         (get-field cd "contract")
+                         (get-field cd "m_summary"))
+        contract-map (contract->map contract-obj)
+        ;; contract->map merges exchange+primaryExch into :exchange; read primaryExch separately
+        primary-exch (some-> (or (try-zero-arg-method contract-obj "primaryExch")
+                                 (get-field contract-obj "primaryExch"))
+                             str not-empty)]
+    (merge
+     (base-event :ib/contract-details {:status :ok :request-id rid})
+     {:req-id       rid
+      :con-id       (:conId contract-map)
+      :symbol       (:symbol contract-map)
+      :sec-type     (:secType contract-map)
+      :exchange     (:exchange contract-map)
+      :primary-exch primary-exch
+      :currency     (:currency contract-map)
+      :long-name    (some-> (or (try-zero-arg-method cd "longName")
+                                (get-field cd "longName")) str)})))
+
+(defn contract-details-end->event
+  "Build normalized `:ib/contract-details-end` event from IB `contractDetailsEnd` callback."
+  [{:keys [req-id]}]
+  (let [rid (parse-long-safe req-id)]
+    (merge
+     (base-event :ib/contract-details-end {:status :ok :request-id rid})
+     {:req-id rid})))
