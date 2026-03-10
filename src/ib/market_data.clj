@@ -72,7 +72,10 @@
 
                    (and (= :ib/tick-snapshot-end (:type val))
                         (= rid (:req-id val)))
-                   (do (client/cancel-mkt-data! conn rid)
+                   ;; IB auto-cancels snapshot subscriptions after tickSnapshotEnd,
+                   ;; so cancelMktData here is redundant and causes a harmless
+                   ;; "Can't find EId" warning. Swallow the error.
+                   (do (try (client/cancel-mkt-data! conn rid) (catch Throwable _ nil))
                        {:ok true :symbol symbol :ticks ticks})
 
                    (and (= :ib/error (:type val))
