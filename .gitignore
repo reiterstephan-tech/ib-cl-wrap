@@ -25,3 +25,11 @@ pom.xml.asc
 # Project-local Clojure / Maven caches
 .clojure/
 .m2/
+
+# Editor / IDE metadata
+.idea/
+*.iml
+.calva/
+.settings/
+.project
+.classpath

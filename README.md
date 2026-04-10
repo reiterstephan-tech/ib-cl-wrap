@@ -1,6 +1,6 @@
 # ib-cl-wrap
 
-English README: [README.en.md](/Users/stephan/Syncthing/dev/clojure/ib-cl-wrap/README.en.md)
+English README: [README.en.md](README.en.md)
 
 Asynchroner Clojure-Wrapper fuer die Interactive Brokers TWS/IB Gateway Java API.
 
@@ -9,9 +9,9 @@ Der Wrapper nutzt `core.async` fuer ein Event-basiertes Modell und vermeidet blo
 ## Spec-driven
 
 Das Projekt ist spec-driven aufgebaut:
-- zentrale Specs: [spec.clj](/Users/stephan/Syncthing/dev/clojure/ib-cl-wrap/src/ib/spec.clj)
-- Public Surface Uebersicht: [spec-surface.md](/Users/stephan/Syncthing/dev/clojure/ib-cl-wrap/docs/spec-surface.md)
-- Event-Vertrag: [events.md](/Users/stephan/Syncthing/dev/clojure/ib-cl-wrap/docs/events.md)
+- zentrale Specs: [spec.clj](src/ib/spec.clj)
+- Public Surface Uebersicht: [spec-surface.md](docs/spec-surface.md)
+- Event-Vertrag: [events.md](docs/events.md)
 
 Garantiert werden:
 - strukturierte Config-Maps fuer Public APIs
@@ -112,7 +112,7 @@ IB-Fehler (`:ib/error`) enthalten bei korrelierbaren Requests zusaetzlich:
 - `:request` (z. B. `{:type :account-summary ...}`)
 - `:retryable?` (heuristische Klassifikation fuer transient/retrybar)
 
-Versionierter Event-Contract: [docs/event-schema-v1.md](/Users/stephan/Syncthing/dev/clojure/ib-cl-wrap/docs/event-schema-v1.md)
+Versionierter Event-Contract: [docs/event-schema-v1.md](docs/event-schema-v1.md)
 
 Contract-Normalisierung (stabil):
 - `:conId`

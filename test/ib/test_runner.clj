@@ -5,6 +5,7 @@
             [ib.account-test]
             [ib.client-test]
             [ib.events-test]
+            [ib.market-data-test]
             [ib.open-orders-test]
             [ib.spec]
             [ib.spec-generative-test]
@@ -18,6 +19,7 @@
                                           'ib.client-test
                                           'ib.account-test
                                           'ib.events-test
+                                          'ib.market-data-test
                                           'ib.open-orders-test
                                           'ib.positions-test)]
     (stest/unstrument ib.spec/public-api-vars)

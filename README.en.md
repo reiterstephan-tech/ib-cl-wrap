@@ -6,14 +6,14 @@ The wrapper uses `core.async` with an event-driven model and avoids blocking log
 
 ## Language
 
-- German README: [README.md](/Users/stephan/Syncthing/dev/clojure/ib-cl-wrap/README.md)
+- German README: [README.md](README.md)
 
 ## Spec-driven
 
 The project is spec-driven:
-- central specs: [spec.clj](/Users/stephan/Syncthing/dev/clojure/ib-cl-wrap/src/ib/spec.clj)
-- public surface overview: [spec-surface.md](/Users/stephan/Syncthing/dev/clojure/ib-cl-wrap/docs/spec-surface.md)
-- event contract: [events.md](/Users/stephan/Syncthing/dev/clojure/ib-cl-wrap/docs/events.md)
+- central specs: [spec.clj](src/ib/spec.clj)
+- public surface overview: [spec-surface.md](docs/spec-surface.md)
+- event contract: [events.md](docs/events.md)
 
 Guaranteed:
 - structured config maps for public APIs
@@ -114,7 +114,7 @@ For correlated `:ib/error` events:
 - `:request`
 - `:retryable?`
 
-Versioned event contract: [event-schema-v1.md](/Users/stephan/Syncthing/dev/clojure/ib-cl-wrap/docs/event-schema-v1.md)
+Versioned event contract: [event-schema-v1.md](docs/event-schema-v1.md)
 
 Account Summary is subscription-based in IB. The snapshot helper actively cancels via `cancelAccountSummary` on success and timeout/error.
 

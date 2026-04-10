@@ -5,12 +5,23 @@
   market data subscription is required for testing."
   (:require [clojure.core.async :as async]
             [ib.client :as client]
-            [ib.events :as events]))
+            [ib.events :as events]
+            [clojure.string :as str]))
 
 (def ^:private req-id-counter (atom 800000))
 
 (defn- next-req-id! []
   (swap! req-id-counter inc))
+
+(defn- delayed-data-notice?
+  "True when an IB error event is only the delayed-data-available notice.
+
+  IB can emit this after `reqMktDataType(4)` when live data is unavailable,
+  but delayed snapshot ticks may still follow."
+  [{:keys [message]}]
+  (boolean
+   (when (string? message)
+     (str/includes? (str/lower-case message) "delayed market data is available"))))
 
 (defn market-data-snapshot!
   "Request a single market data snapshot for one contract.
@@ -82,9 +93,10 @@
 
                    (and (= :ib/error (:type val))
                         (= rid (:request-id val)))
-                   (do (client/cancel-mkt-data! conn rid)
-                       {:ok false :error :ib-error :symbol symbol
-                        :message (:message val) :code (:code val)})
+                   (when-not (delayed-data-notice? val)
+                     (do (client/cancel-mkt-data! conn rid)
+                         {:ok false :error :ib-error :symbol symbol
+                          :message (:message val) :code (:code val)}))
 
                    :else nil)]
              (if done-result
