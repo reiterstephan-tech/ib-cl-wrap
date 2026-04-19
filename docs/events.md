@@ -1,6 +1,13 @@
 # Events
 
-All events include envelope keys:
+This is the authoritative normalized event contract for `ib-cl-wrap`.
+
+Status: Done for Phase 1 as of 2026-04-19.
+
+## Common Envelope
+
+Every normalized event includes:
+
 - `:type`
 - `:source`
 - `:status`
@@ -8,10 +15,20 @@ All events include envelope keys:
 - `:ts`
 - `:schema-version`
 
-## Event Types
+`event-schema-v1.md` defines the versioned schema rules. New consumers should
+use `:request-id` as the canonical request-correlation field.
+
+Compatibility note:
+
+- some event types still include legacy fields such as `:req-id` or `:id`
+- those fields remain for `0.x` compatibility, but they are not canonical
+
+## Stable Event Types
+
+These event families are part of the stable contract in Phase 1.
 
 - `:ib/connected`
-  - Keys: `:host`, `:port`, `:client-id`
+  - Guaranteed keys: `:host`, `:port`, `:client-id`
 
 - `:ib/disconnected`
   - Optional keys: `:reason`
@@ -19,61 +36,86 @@ All events include envelope keys:
 - `:ib/error`
   - Optional keys: `:id`, `:code`, `:message`, `:raw`, `:request`, `:retryable?`
 
-- `:ib/next-valid-id`
-  - Keys: `:order-id` (seeds the internal counter used by `next-order-id!` and `place-order!`)
-
 - `:ib/position`
-  - Keys: `:account`, `:contract`, `:position`, `:avg-cost`
+  - Guaranteed keys: `:account`, `:contract`
+  - Compatibility keys currently emitted: `:position`, `:avg-cost`
 
 - `:ib/position-end`
-  - No additional payload keys.
+  - No additional guaranteed payload keys
 
 - `:ib/account-summary`
-  - Keys: `:req-id`, `:account`, `:tag`, `:value`, `:currency`
+  - Guaranteed keys: `:request-id`, `:account`, `:tag`, `:value`, `:currency`
+  - Compatibility key currently emitted: `:req-id`
 
 - `:ib/account-summary-end`
-  - Keys: `:req-id`
+  - Guaranteed keys: `:request-id`
+  - Compatibility key currently emitted: `:req-id`
 
 - `:ib/open-order`
-  - Keys: `:order-id`, `:perm-id`, `:account`, `:contract`, `:order`, `:order-state`
+  - Guaranteed keys: `:order-id`, `:contract`, `:order`, `:order-state`
+  - Optional keys: `:perm-id`, `:account`
 
 - `:ib/order-status`
-  - Keys: `:order-id`, `:status-text`, `:filled`, `:remaining`, `:avg-fill-price`, `:perm-id`, `:parent-id`, `:client-id`, `:last-fill-price`, `:why-held`, `:mkt-cap-price`
+  - Guaranteed keys: `:order-id`, `:status-text`
+  - Optional keys: `:filled`, `:remaining`, `:avg-fill-price`, `:perm-id`,
+    `:parent-id`, `:client-id`, `:last-fill-price`, `:why-held`,
+    `:mkt-cap-price`
 
 - `:ib/open-order-end`
-  - No additional payload keys.
+  - No additional guaranteed payload keys
 
 - `:ib/update-account-value`
-  - Keys: `:key`, `:value`, `:currency`, `:account`
+  - Guaranteed keys: `:key`, `:value`, `:currency`, `:account`
 
 - `:ib/update-account-time`
-  - Keys: `:time`
+  - Guaranteed keys: `:time`
 
 - `:ib/update-portfolio`
-  - Keys: `:contract`, `:position`, `:market-price`, `:market-value`, `:average-cost`, `:unrealized-pnl`, `:realized-pnl`, `:account`
+  - Guaranteed keys: `:contract`, `:position`, `:market-price`,
+    `:market-value`, `:average-cost`, `:unrealized-pnl`, `:realized-pnl`,
+    `:account`
 
 - `:ib/account-download-end`
-  - Keys: `:account`
+  - Guaranteed keys: `:account`
+
+## Experimental Event Types
+
+These event families are exposed, but remain experimental in Phase 1 because
+their surrounding APIs are still expected to evolve in Phase 2.
+
+- `:ib/next-valid-id`
+  - Guaranteed keys: `:order-id`
 
 - `:ib/reconnecting`
-  - Keys: `:attempt`, `:delay-ms`
+  - Guaranteed keys: `:attempt`, `:delay-ms`
 
 - `:ib/reconnected`
-  - Keys: `:host`, `:port`, `:client-id`, `:attempt`
+  - Guaranteed keys: `:host`, `:port`, `:client-id`, `:attempt`
 
 - `:ib/reconnect-failed`
-  - Keys: `:attempts`
+  - Guaranteed keys: `:attempts`
 
 - `:ib/tick-price`
-  - Keys: `:req-id`, `:field` (raw IB tick type integer), `:field-key` (`:bid`/`:ask`/`:last`/`:high`/`:low`/`:close`/`:open` or `nil`), `:price`
+  - Guaranteed keys: `:req-id`, `:field`
+  - Optional keys: `:field-key`, `:price`
 
 - `:ib/tick-snapshot-end`
-  - Keys: `:req-id`
+  - Guaranteed keys: `:req-id`
 
 - `:ib/contract-details`
-  - Keys: `:req-id`, `:contract-details` (map with `:contract` (see contract shape below), `:long-name`, `:min-tick`, `:trading-hours`, `:liquid-hours`, `:time-zone-id`)
-  - One event per matching contract; followed by `:ib/contract-details-end`
-  - The inner `:contract` map has keys: `:conId`, `:symbol`, `:secType`, `:currency`, `:exchange`
+  - Guaranteed keys: `:req-id`, `:contract-details`
+  - One event per matching contract, followed by `:ib/contract-details-end`
 
 - `:ib/contract-details-end`
-  - Keys: `:req-id`
+  - Guaranteed keys: `:req-id`
+
+## Contract Shape
+
+The normalized inner contract map used in position, portfolio, and contract
+details events has these guaranteed keys when available from IB:
+
+- `:conId`
+- `:symbol`
+- `:secType`
+- `:currency`
+- `:exchange`

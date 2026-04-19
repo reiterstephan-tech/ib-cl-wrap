@@ -2,10 +2,15 @@
 
 English README: [README.en.md](README.en.md)
 
+Autoritaet:
+- Dieses README ist die autoritative Top-Level-Uebersicht.
+- [README.en.md](README.en.md) ist die gepflegte englische Uebersetzung.
+
 Projekt-Dokumentation:
 - [Changelog](/Users/stephan/Syncthing/dev/codex/ib-cl-wrap/CHANGELOG.md)
 - [API Stabilization Roadmap](/Users/stephan/Syncthing/dev/codex/ib-cl-wrap/docs/roadmap.md)
 - [Downstream Migration Guide](/Users/stephan/Syncthing/dev/codex/ib-cl-wrap/docs/downstream-migration.md)
+- [Compatibility Policy](/Users/stephan/Syncthing/dev/codex/ib-cl-wrap/docs/compatibility.md)
 
 Asynchroner Clojure-Wrapper fuer die Interactive Brokers TWS/IB Gateway Java API.
 
@@ -37,6 +42,26 @@ Typische Ports:
 
 In `deps.edn` ist `lib/ibapi.jar` bereits in `:paths` eingetragen. Wenn die JAR fehlt, werfen `ib.client/connect!` und andere IB-nahe Funktionen eine erklaerende Exception.
 
+## API-Status
+
+Phase 1 ist abgeschlossen.
+
+Stabil fuer Downstream-Nutzung:
+- `ib.client` Verbindung, Event-Subscription, Positions-, Account-Summary-,
+  Open-Orders- und Request-Korrelation-APIs
+- `ib.positions/positions-snapshot!`
+- `ib.account/account-summary-snapshot!`
+- `ib.open-orders/open-orders-snapshot!`
+
+Experimentell waehrend `0.x`:
+- Market Data
+- Contract Details
+- Reconnect-bezogene Event-Familien
+- Order-ID- und Order-Placement-APIs
+
+Connection-Handles aus `connect!` sind opake Maps. Downstream-Code soll keine
+internen Keys voraussetzen.
+
 ## API
 
 ### Namespace `ib.client`
@@ -55,6 +80,7 @@ In `deps.edn` ist `lib/ibapi.jar` bereits in `:paths` eingetragen. Wenn die JAR 
 - `register-request!` / `unregister-request!` / `request-context` - Request-Korrelation ueber `req-id` fuer request-bezogene Fehler.
 - `dropped-event-count` - Anzahl nicht enqueueter Events.
 - `events-chan` - gibt den geteilten Event-Channel zurueck.
+- `connected?`, `req-market-data-type!`, `req-mkt-data!`, `cancel-mkt-data!`, `req-contract-details!`, `req-ids!`, `next-order-id!`, `place-order!`, `cancel-order!` - vorhanden, aber in Phase 1 noch experimentell.
 
 ### Namespace `ib.positions`
 
@@ -73,6 +99,14 @@ In `deps.edn` ist `lib/ibapi.jar` bereits in `:paths` eingetragen. Wenn die JAR 
 - `open-orders-snapshot-from-events!` - Collector fuer simulierte Tests.
 - Guard gegen parallele Open-Orders-Snapshots pro Verbindung (`:snapshot-in-flight` Fehler).
 
+### Namespace `ib.contract`
+
+- `contract-details-snapshot!` - vorhanden, aber in Phase 1 noch experimentell.
+
+### Namespace `ib.market-data`
+
+- `market-data-snapshot!` - vorhanden, aber in Phase 1 noch experimentell.
+
 Default-Tags fuer Balances:
 - `NetLiquidation`
 - `TotalCashValue`
@@ -83,9 +117,8 @@ Default-Tags fuer Balances:
 
 ### Namespace `ib.events`
 
-- `contract->map` - normalisiert Contract auf stabiles Map-Format.
-- `position->event`, `error->event` - Event-Normalisierung.
-- `create-event-bus` - bounded Event-Infrastruktur mit Backpressure-Strategie.
+`ib.events` ist eine wichtige interne Implementierungs- und Normalisierungs-
+Namespace, aber keine stabile Public API.
 
 ## Event-Schema
 
@@ -103,6 +136,13 @@ Minimale Event-Typen:
 - `{:type :ib/update-account-time :time <string> :ts <millis>}`
 - `{:type :ib/update-portfolio :contract {...} :position <double> ... :account <string> :ts <millis>}`
 - `{:type :ib/account-download-end :account <string> :ts <millis>}`
+- `{:type :ib/reconnecting ...}` (experimentell)
+- `{:type :ib/reconnected ...}` (experimentell)
+- `{:type :ib/reconnect-failed ...}` (experimentell)
+- `{:type :ib/tick-price ...}` (experimentell)
+- `{:type :ib/tick-snapshot-end ...}` (experimentell)
+- `{:type :ib/contract-details ...}` (experimentell)
+- `{:type :ib/contract-details-end ...}` (experimentell)
 
 Einheitliche Event-Felder (v1):
 - `:type`
@@ -116,6 +156,10 @@ IB-Fehler (`:ib/error`) enthalten bei korrelierbaren Requests zusaetzlich:
 - `:request-id`
 - `:request` (z. B. `{:type :account-summary ...}`)
 - `:retryable?` (heuristische Klassifikation fuer transient/retrybar)
+
+Neue Downstream-Integrationen sollen `:request-id` als kanonischen
+Request-Key verwenden. Legacy-Felder wie `:req-id` bleiben waehrend `0.x`
+Kompatibilitaetsfelder.
 
 Versionierter Event-Contract: [docs/event-schema-v1.md](docs/event-schema-v1.md)
 

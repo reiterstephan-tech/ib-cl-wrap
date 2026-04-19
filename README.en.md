@@ -4,6 +4,7 @@ Project documentation:
 - [Changelog](/Users/stephan/Syncthing/dev/codex/ib-cl-wrap/CHANGELOG.md)
 - [API Stabilization Roadmap](/Users/stephan/Syncthing/dev/codex/ib-cl-wrap/docs/roadmap.md)
 - [Downstream Migration Guide](/Users/stephan/Syncthing/dev/codex/ib-cl-wrap/docs/downstream-migration.md)
+- [Compatibility Policy](/Users/stephan/Syncthing/dev/codex/ib-cl-wrap/docs/compatibility.md)
 
 Asynchronous Clojure wrapper for the Interactive Brokers TWS/IB Gateway Java API.
 
@@ -12,6 +13,8 @@ The wrapper uses `core.async` with an event-driven model and avoids blocking log
 ## Language
 
 - German README: [README.md](README.md)
+- `README.md` is the authoritative top-level README for policy and project positioning.
+- `README.en.md` is the maintained English translation.
 
 ## Spec-driven
 
@@ -39,6 +42,26 @@ Typical ports:
 
 `deps.edn` already includes `lib/ibapi.jar` in `:paths`. If the JAR is missing, `ib.client/connect!` and other IB-facing functions throw a descriptive exception.
 
+## API Status
+
+Phase 1 is complete.
+
+Stable for downstream use:
+- `ib.client` connection, event subscription, positions, account-summary,
+  open-orders, and request-correlation APIs
+- `ib.positions/positions-snapshot!`
+- `ib.account/account-summary-snapshot!`
+- `ib.open-orders/open-orders-snapshot!`
+
+Experimental during `0.x`:
+- market data
+- contract details
+- reconnect-oriented event families
+- order-id and order-placement APIs
+
+Handles returned by `connect!` are opaque maps. Downstream code should not rely
+on internal keys.
+
 ## API
 
 ### Namespace `ib.client`
@@ -57,6 +80,7 @@ Typical ports:
 - `register-request!` / `unregister-request!` / `request-context` - request-correlation helpers.
 - `dropped-event-count` - number of events not enqueued.
 - `events-chan` - return shared event channel.
+- `connected?`, `req-market-data-type!`, `req-mkt-data!`, `cancel-mkt-data!`, `req-contract-details!`, `req-ids!`, `next-order-id!`, `place-order!`, `cancel-order!` - available, but still experimental in Phase 1.
 
 ### Namespace `ib.positions`
 
@@ -75,6 +99,14 @@ Typical ports:
 - `open-orders-snapshot-from-events!` - collector helper for simulated tests.
 - in-flight guard prevents parallel open-orders snapshots on one connection (`:snapshot-in-flight` error).
 
+### Namespace `ib.contract`
+
+- `contract-details-snapshot!` - available, but still experimental in Phase 1.
+
+### Namespace `ib.market-data`
+
+- `market-data-snapshot!` - available, but still experimental in Phase 1.
+
 Default balance tags:
 - `NetLiquidation`
 - `TotalCashValue`
@@ -85,9 +117,8 @@ Default balance tags:
 
 ### Namespace `ib.events`
 
-- `contract->map` - normalize contract into a stable map format.
-- `position->event`, `error->event` - event normalization.
-- `create-event-bus` - bounded event infrastructure with backpressure strategy.
+`ib.events` remains an important internal normalization namespace, but it is
+not part of the stable public API contract.
 
 ## Event Schema
 
@@ -105,6 +136,13 @@ Minimum event types:
 - `{:type :ib/update-account-time ...}`
 - `{:type :ib/update-portfolio ...}`
 - `{:type :ib/account-download-end ...}`
+- `{:type :ib/reconnecting ...}` (experimental)
+- `{:type :ib/reconnected ...}` (experimental)
+- `{:type :ib/reconnect-failed ...}` (experimental)
+- `{:type :ib/tick-price ...}` (experimental)
+- `{:type :ib/tick-snapshot-end ...}` (experimental)
+- `{:type :ib/contract-details ...}` (experimental)
+- `{:type :ib/contract-details-end ...}` (experimental)
 
 Unified v1 envelope keys:
 - `:type`
@@ -118,6 +156,10 @@ For correlated `:ib/error` events:
 - `:request-id`
 - `:request`
 - `:retryable?`
+
+New downstream integrations should treat `:request-id` as the canonical
+request-correlation key. Legacy keys such as `:req-id` remain compatibility
+fields during `0.x`.
 
 Versioned event contract: [event-schema-v1.md](docs/event-schema-v1.md)
 

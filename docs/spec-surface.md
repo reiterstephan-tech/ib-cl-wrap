@@ -1,55 +1,94 @@
 # Spec Surface
 
-## Public Surface
+This is the authoritative public surface declaration for Phase 1.
+
+Status: Done as of 2026-04-19.
+
+Policy references:
+- [Compatibility Policy](/Users/stephan/Syncthing/dev/codex/ib-cl-wrap/docs/compatibility.md)
+- [Event Contract](/Users/stephan/Syncthing/dev/codex/ib-cl-wrap/docs/events.md)
+
+## Stable Public API
+
+These APIs are the frozen stable public surface for Phase 1.
 
 ### `ib.client`
-- `connect!` - connection config map (`:host`, `:port`, `:client-id`, `:event-buffer-size`, `:overflow-strategy`) -> connection handle map.
-- `disconnect!` - connection handle -> disconnected handle.
-- `events-chan` - connection handle -> shared event channel.
-- `subscribe-events!` / `unsubscribe-events!` - event subscription lifecycle.
-- `req-positions!` - trigger IB `reqPositions`.
-- `req-open-orders!` - trigger IB `reqOpenOrders`.
-- `req-all-open-orders!` - trigger IB `reqAllOpenOrders`.
-- `req-account-summary!` / `cancel-account-summary!` - account summary request lifecycle.
-- `req-account-updates!` / `cancel-account-updates!` - account updates streaming lifecycle.
-- `register-request!` / `unregister-request!` / `request-context` - request correlation registry helpers.
+
+- `connect!` - create a connection handle from a config map
+- `disconnect!` - disconnect and close wrapper resources
+- `events-chan` - return the shared event channel for diagnostics
+- `subscribe-events!` / `unsubscribe-events!` - manage event subscriptions
+- `req-positions!` - trigger `reqPositions`
+- `req-open-orders!` - trigger `reqOpenOrders`
+- `req-all-open-orders!` - trigger `reqAllOpenOrders`
+- `req-account-summary!` / `cancel-account-summary!` - manage account-summary requests
+- `req-account-updates!` / `cancel-account-updates!` - manage account-updates streaming
+- `register-request!` / `unregister-request!` / `request-context` - request-correlation helpers
+- `dropped-event-count` - diagnostic counter for events the wrapper could not enqueue
 
 ### `ib.positions`
-- `positions-snapshot!` - returns a channel yielding one snapshot result (vector of position events or error map).
-- `positions-snapshot-from-events!` - collector helper for simulated event streams.
+
+- `positions-snapshot!` - snapshot helper built on the event stream
+
+`positions-snapshot-from-events!` remains available as a collector helper for
+tests and simulation, but it is not part of the stable surface.
 
 ### `ib.account`
-- `account-summary-snapshot!` - returns a channel yielding one result map (`{:ok true ...}` / `{:ok false ...}`).
-- `account-summary-snapshot-from-events!` - collector helper for simulated event streams.
-- `next-req-id!` - request id allocator.
+
+- `account-summary-snapshot!` - snapshot helper for account summary requests
+
+`account-summary-snapshot-from-events!` and `next-req-id!` remain available for
+testing and advanced usage, but they are not part of the stable surface.
 
 ### `ib.open-orders`
-- `open-orders-snapshot!` - returns a channel yielding one result map (`{:ok true :orders [...]}` / `{:ok false ...}`).
-- `open-orders-snapshot-from-events!` - collector helper for simulated event streams.
 
-## Event Contract
+- `open-orders-snapshot!` - snapshot helper for open orders
 
-Current event types emitted by the wrapper:
-- `:ib/connected`
-- `:ib/disconnected`
-- `:ib/error`
-- `:ib/next-valid-id`
-- `:ib/position`
-- `:ib/position-end`
-- `:ib/account-summary`
-- `:ib/account-summary-end`
-- `:ib/open-order`
-- `:ib/order-status`
-- `:ib/open-order-end`
-- `:ib/update-account-value`
-- `:ib/update-account-time`
-- `:ib/update-portfolio`
-- `:ib/account-download-end`
+`open-orders-snapshot-from-events!` remains available as a collector helper,
+but it is not part of the stable surface.
 
-All events follow the v1 unified envelope keys:
-- `:type`
-- `:source`
-- `:status`
-- `:request-id`
-- `:ts`
-- `:schema-version`
+## Experimental Public API
+
+These APIs are callable and documented, but they are still experimental in
+Phase 1. They may be renamed, consolidated, or shape-normalized in Phase 2.
+
+### `ib.client`
+
+- `connected?`
+- `req-market-data-type!`
+- `req-mkt-data!`
+- `cancel-mkt-data!`
+- `req-contract-details!`
+- `req-ids!`
+- `next-order-id!`
+- `place-order!`
+- `cancel-order!`
+
+### `ib.contract`
+
+- `contract-details-snapshot!`
+
+### `ib.market-data`
+
+- `market-data-snapshot!`
+
+## Internal Namespaces
+
+The following namespaces contain important implementation helpers, but are not
+stable public API contracts:
+
+- `ib.events`
+- `ib.errors`
+- `ib.spec`
+
+They may change in any `0.x` release unless a function is separately promoted
+into the public surface.
+
+## Stable Boundary Notes
+
+- connection handles are opaque maps; consumers should not depend on their keys
+- `:request-id` is the canonical request-correlation key for normalized events
+- legacy event keys such as `:req-id` and `:id` remain compatibility fields
+  during `0.x`, but are not canonical
+- Phase 1 freezes which APIs are public; it does not freeze final canonical
+  result envelopes for every helper

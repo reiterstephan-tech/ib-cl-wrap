@@ -3,6 +3,10 @@
 This roadmap describes the recommended implementation order for stabilizing the
 public API of `ib-cl-wrap`.
 
+Status update:
+- Milestone A completed on 2026-04-19 by finishing Phase 1 and publishing the
+  stable-surface and compatibility documents.
+
 The goal is not only to make the code pass tests, but to make the API easier to
 understand, safer to depend on, and cheaper to evolve.
 
@@ -122,6 +126,7 @@ Document:
 ## Suggested Milestones
 
 - Milestone A: complete Phase 1
+  - status: done on 2026-04-19
   - repository has a declared stable surface
 - Milestone B: complete Phase 2
   - repository is ready for a practical v1 API release candidate

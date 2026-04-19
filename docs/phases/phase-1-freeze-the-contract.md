@@ -1,5 +1,7 @@
 # Phase 1: Freeze the Contract
 
+Status: Done on 2026-04-19.
+
 ## Goal
 
 Define the exact public API that `ib-cl-wrap` intends to support as stable.
@@ -142,3 +144,4 @@ Phase 1 is done when:
 - downstream consumers have enough information to audit their current usage
 - the project has a written versioning policy
 - the project has a written IB API compatibility statement
+- documentation authority is explicitly defined

@@ -30,6 +30,18 @@ Document:
 - which IB API jar versions are supported
 - whether result-shape changes are still expected in Phase 2
 
+Current Phase 1 downstream actions:
+
+- treat [docs/spec-surface.md](/Users/stephan/Syncthing/dev/codex/ib-cl-wrap/docs/spec-surface.md)
+  as the stable API boundary
+- treat market data, contract details, reconnect helpers, and order-placement
+  helpers as experimental during `0.x`
+- stop treating visible helper namespaces such as `ib.events` as stable API
+- prefer `:request-id` over legacy event keys such as `:req-id`
+- treat connection handles from `connect!` as opaque maps
+- expect Phase 2 to normalize duplicate contract-details and snapshot result
+  conventions before `1.0`
+
 ### Phase 2
 
 Document:

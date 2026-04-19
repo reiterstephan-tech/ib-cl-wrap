@@ -6,6 +6,7 @@
             [ib.client]
             [ib.contract]
             [ib.events]
+            [ib.market-data]
             [ib.open-orders]
             [ib.positions]))
 
@@ -413,7 +414,7 @@
   :ret :ib/channel)
 
 (def public-api-vars
-  "Vars to instrument in dev/test environments."
+  "Stable public API vars to instrument in dev/test environments."
   [#'ib.client/connect!
    #'ib.client/disconnect!
    #'ib.client/events-chan
@@ -432,8 +433,14 @@
    #'ib.client/unregister-request!
    #'ib.client/request-context
    #'ib.client/dropped-event-count
-   #'ib.open-orders/open-orders-snapshot!
-   #'ib.client/connected?
+   #'ib.open-orders/open-orders-snapshot!])
+
+(def experimental-public-api-vars
+  "Supported but still experimental API vars.
+
+  These vars are documented for evaluation and downstream planning, but they
+  are not part of the frozen stable surface for Phase 1."
+  [#'ib.client/connected?
    #'ib.client/req-market-data-type!
    #'ib.client/req-mkt-data!
    #'ib.client/cancel-mkt-data!
@@ -442,4 +449,5 @@
    #'ib.client/place-order!
    #'ib.client/cancel-order!
    #'ib.client/req-contract-details!
-   #'ib.contract/contract-details-snapshot!])
+   #'ib.contract/contract-details-snapshot!
+   #'ib.market-data/market-data-snapshot!])
