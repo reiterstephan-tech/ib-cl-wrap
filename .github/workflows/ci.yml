@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "codex/**"
+      - "feature/**"
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Clojure
+        uses: DeLaGuardo/setup-clojure@13.2
+        with:
+          cli: latest
+
+      - name: Cache Clojure dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+            ~/.deps.clj
+          key: clojure-${{ runner.os }}-${{ hashFiles('deps.edn') }}
+          restore-keys: |
+            clojure-${{ runner.os }}-
+
+      - name: Check formatting
+        run: >
+          clojure -Sdeps '{:deps {dev.weavejester/cljfmt {:mvn/version "0.13.2"}}}'
+          -m cljfmt.main check src test
+
+      - name: Run clj-kondo
+        run: >
+          docker run --rm
+          -v "$PWD:/work"
+          -w /work
+          cljkondo/clj-kondo:latest
+          clj-kondo --lint src test
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Clojure
+        uses: DeLaGuardo/setup-clojure@13.2
+        with:
+          cli: latest
+
+      - name: Cache Clojure dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+            ~/.deps.clj
+          key: clojure-${{ runner.os }}-${{ hashFiles('deps.edn') }}
+          restore-keys: |
+            clojure-${{ runner.os }}-
+
+      - name: Run tests
+        run: clojure -M:test

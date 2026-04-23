@@ -1,0 +1,65 @@
+name: Integration
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * 1"
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: Optional integration lane
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Clojure
+        uses: DeLaGuardo/setup-clojure@13.2
+        with:
+          cli: latest
+
+      - name: Cache Clojure dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+            ~/.deps.clj
+          key: clojure-${{ runner.os }}-${{ hashFiles('deps.edn') }}
+          restore-keys: |
+            clojure-${{ runner.os }}-
+
+      - name: Check whether integration suite is configured
+        id: integration-check
+        shell: bash
+        run: |
+          if rg -n '^[[:space:]]*:integration[[:space:]]' deps.edn >/dev/null 2>&1; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run integration tests
+        if: steps.integration-check.outputs.configured == 'true'
+        env:
+          IB_INTEGRATION: "1"
+        run: clojure -M:integration
+
+      - name: No integration suite configured
+        if: steps.integration-check.outputs.configured != 'true'
+        run: echo "No :integration alias is configured yet. Add one when live or sandbox IB checks are ready."
